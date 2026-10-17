@@ -9,7 +9,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP SDK](https://img.shields.io/badge/MCP-2024--11--05-10a37f?style=flat-square)](https://modelcontextprotocol.io)
 [![Protocol: Yjs + lib0](https://img.shields.io/badge/CRDT-Yjs_%2B_lib0_v3-ff69b4?style=flat-square)](./docs/PROTOCOL.md)
-[![Tests](https://img.shields.io/badge/Tests-7_Passing_(52_Assertions)-2ea44f?style=flat-square)](./test/typst-mcp.test.ts)
+[![Tests](https://img.shields.io/badge/Tests-7_Passing_(57_Assertions)-2ea44f?style=flat-square)](./test/typst-mcp.test.ts)
 
 </div>
 
@@ -23,7 +23,7 @@
 - **Binary `/editing/v3` WebSocket Wire Protocol:** Encodes and decodes `lib0` variable-length binary frames (`Subscribe`, `TextUpdate`, `Pong`, `Refresh`, `Presence`, `Cursor`, `Leave`) with REST `/v1/files/:projectId/:fileId/yjs` persistence.
 - **GraphQL & REST Project Management:** Full project CRUD, file tree inspection, rename/move, delete, and binary figure/asset uploads (`PNG`, `JPG`, `SVG`, `PDF`, fonts).
 - **Direct Authentication + Fallback:** Authenticates via `GET /v1/to-signin` + `POST /v1/auth/signin` (`__Http-typst-session`), with persistent session caching and automatic cookie/Playwright fallback on challenge.
-- **Compiler Diagnostics & PDF Export:** Synchronizes cloud Yjs text and binary assets into an isolated workspace and runs the Typst compiler to return structured line/column diagnostics and compiled PDFs.
+- **Compiler Diagnostics, Preview Screenshots & PDF Export:** Synchronizes cloud Yjs text and binary assets into an isolated workspace and runs the Typst compiler to return structured line/column diagnostics, high-DPI PNG preview screenshots (`typst_capture_screenshot`), and compiled PDFs (`typst_export_pdf`).
 
 ---
 
@@ -127,9 +127,9 @@ typst-web-mcp/
 │   ├── client/
 │   │   ├── auth.ts              # Direct /v1/auth/signin login, cookie jar & Playwright fallback
 │   │   └── typst-client.ts      # TypstCloudClient (REST, GraphQL, WebSocket v3, Compiler)
-│   └── index.ts                 # MCP stdio server entrypoint (15 tools)
+│   └── index.ts                 # MCP stdio server entrypoint (16 tools)
 ├── test/
-│   └── typst-mcp.test.ts        # 7 test suites (52 assertions) covering codecs, CRDTs & E2E
+│   └── typst-mcp.test.ts        # 7 test suites (57 assertions) covering codecs, CRDTs & E2E
 ├── LICENSE                      # MIT License
 └── package.json
 ```
