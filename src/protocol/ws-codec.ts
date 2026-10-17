@@ -175,10 +175,16 @@ function isRefreshAction(val: number): val is RefreshAction {
 
 function decodeOptionalString(decoder: Decoder): string | null {
   const s = readVarString(decoder);
-  return s === "" ? null : s;
+  if (s === "") {
+    return null;
+  }
+  return s;
 }
 
-function encodeOptionalString(encoder: Encoder, value: string | null | undefined): void {
+function encodeOptionalString(
+  encoder: Encoder,
+  value: string | null | undefined
+): void {
   writeVarString(encoder, value ?? "");
 }
 
@@ -187,7 +193,11 @@ function decodeBoolean(decoder: Decoder): boolean {
 }
 
 function encodeBoolean(encoder: Encoder, value: boolean): void {
-  writeUint8(encoder, value ? 1 : 0);
+  if (value) {
+    writeUint8(encoder, 1);
+  } else {
+    writeUint8(encoder, 0);
+  }
 }
 
 function decodeRelativePosition(decoder: Decoder): RelativePosition {
@@ -377,7 +387,9 @@ export function decodeMessage(
         throw new ProtocolEnumerationError("MessageKind", kind);
     }
   } catch (err) {
-    if (err instanceof ProtocolError) throw err;
+    if (err instanceof ProtocolError) {
+      throw err;
+    }
     throw new ProtocolParseError("Failed to decode message", err);
   }
 }

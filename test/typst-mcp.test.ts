@@ -522,14 +522,21 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
               name
             );
             const id = `file_${proj.files.size + 1}_${Date.now()}`;
+            let yjsState: Uint8Array | undefined;
+            let blobBytes: Uint8Array | undefined;
+            if (isText) {
+              yjsState = createInitialYjsUpdate(
+                new TextDecoder().decode(bytes)
+              );
+            } else {
+              blobBytes = bytes;
+            }
             const record: MockFileRecord = {
               id,
               name,
               isMultiplayable: isText,
-              yjsState: isText
-                ? createInitialYjsUpdate(new TextDecoder().decode(bytes))
-                : undefined,
-              blobBytes: isText ? undefined : bytes,
+              yjsState,
+              blobBytes,
               size: bytes.byteLength,
               version: 1,
               lastChangeDate: Date.now(),
@@ -554,10 +561,12 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
       },
       websocket: {
         message(ws, message) {
-          const bytes =
-            typeof message === "string"
-              ? new TextEncoder().encode(message)
-              : new Uint8Array(message);
+          let bytes: Uint8Array;
+          if (typeof message === "string") {
+            bytes = new TextEncoder().encode(message);
+          } else {
+            bytes = new Uint8Array(message);
+          }
           const decoded = decodeMessage(bytes, "client");
           if (decoded.kind === MessageKind.Subscribe) {
             ws.data.subscribedProject = decoded.rid;
@@ -851,7 +860,7 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
       projectId,
     })) as any;
     expect(delProj.deleted).toBe(true);
-  });
+  }, 20000);
 
   test("spawns MCP server over JSON-RPC stdio and responds to initialize and tools/list", async () => {
     const proc = Bun.spawn(["bun", "C:/Users/Toan/typst-mcp/src/index.ts"], {

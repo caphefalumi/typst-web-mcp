@@ -5,6 +5,19 @@ export interface TextEditOperation {
   newText: string;
 }
 
+function computeUpdateDiff(
+  doc: Y.Doc,
+  remoteUpdate: Uint8Array
+): { encodedUpdate: Uint8Array; mergedState: Uint8Array } {
+  let stateVector: Uint8Array | undefined;
+  if (remoteUpdate.byteLength > 0) {
+    stateVector = Y.encodeStateVectorFromUpdate(remoteUpdate);
+  }
+  const encodedUpdate = Y.encodeStateAsUpdate(doc, stateVector);
+  const mergedState = Y.encodeStateAsUpdate(doc);
+  return { encodedUpdate, mergedState };
+}
+
 /**
  * Decodes a binary Yjs state update from GET /v1/files/:projectId/:fileId/yjs
  * into its UTF-8 text string (`doc.getText("text")`).
@@ -67,12 +80,7 @@ export function replaceYjsText(
       }
     });
 
-    const stateVector =
-      remoteUpdate.byteLength > 0
-        ? Y.encodeStateVectorFromUpdate(remoteUpdate)
-        : undefined;
-    const encodedUpdate = Y.encodeStateAsUpdate(doc, stateVector);
-    const mergedState = Y.encodeStateAsUpdate(doc);
+    const { encodedUpdate, mergedState } = computeUpdateDiff(doc, remoteUpdate);
 
     return {
       encodedUpdate,
@@ -112,7 +120,6 @@ export function editYjsText(
     const ytext = doc.getText("text");
     const previousText = ytext.toString();
 
-    // Locate and validate all non-overlapping matches against the original text first
     const matchedRegions: {
       start: number;
       end: number;
@@ -148,7 +155,6 @@ export function editYjsText(
       });
     }
 
-    // Sort descending by start offset so earlier offsets remain valid during in-place Y.Text mutation
     matchedRegions.sort((a, b) => b.start - a.start);
     for (let i = 0; i < matchedRegions.length - 1; i++) {
       const upper = matchedRegions[i]!;
@@ -169,12 +175,7 @@ export function editYjsText(
       }
     });
 
-    const stateVector =
-      remoteUpdate.byteLength > 0
-        ? Y.encodeStateVectorFromUpdate(remoteUpdate)
-        : undefined;
-    const encodedUpdate = Y.encodeStateAsUpdate(doc, stateVector);
-    const mergedState = Y.encodeStateAsUpdate(doc);
+    const { encodedUpdate, mergedState } = computeUpdateDiff(doc, remoteUpdate);
 
     return {
       encodedUpdate,

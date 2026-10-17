@@ -31,23 +31,47 @@ export interface AuthManagerOptions {
   browserFallbackFn?: BrowserLoginFallbackFn;
 }
 
+const DEFAULT_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36";
+
+function extractRawSetCookies(headers: Headers): string[] {
+  const headerWithGetSetCookie = headers as unknown as {
+    getSetCookie?: () => string[];
+  };
+  if (typeof headerWithGetSetCookie.getSetCookie === "function") {
+    return headerWithGetSetCookie.getSetCookie();
+  }
+  const singleCookie = headers.get("set-cookie");
+  if (singleCookie) {
+    return [singleCookie];
+  }
+  return [];
+}
+
+function resolveSessionFilePath(
+  configuredPath: string | null | undefined
+): string | null {
+  if (configuredPath === undefined) {
+    return join(homedir(), ".pi", "agent", "typst-mcp-session.json");
+  }
+  return configuredPath;
+}
+
 export function parseSetCookieHeaders(
   headers: Headers
 ): Record<string, string> {
   const result: Record<string, string> = {};
-  const rawList: string[] =
-    typeof (headers as unknown as { getSetCookie?: () => string[] })
-      .getSetCookie === "function"
-      ? (headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
-      : headers.get("set-cookie")
-        ? [headers.get("set-cookie")!]
-        : [];
+  const rawList = extractRawSetCookies(headers);
 
   for (const raw of rawList) {
     const firstPart = raw.split(";")[0]?.trim();
-    if (!firstPart) continue;
+    if (!firstPart) {
+      continue;
+    }
     const eqIdx = firstPart.indexOf("=");
-    if (eqIdx <= 0) continue;
+    if (eqIdx <= 0) {
+      continue;
+    }
     const name = firstPart.slice(0, eqIdx).trim();
     const val = firstPart.slice(eqIdx + 1).trim();
     if (val === "") {
@@ -61,16 +85,22 @@ export function parseSetCookieHeaders(
 
 export function parseCookieString(cookieStr: string): Record<string, string> {
   const trimmed = cookieStr.trim();
-  if (!trimmed) return {};
+  if (!trimmed) {
+    return {};
+  }
   if (!trimmed.includes("=")) {
     return { "__Http-typst-session": trimmed };
   }
   const map: Record<string, string> = {};
   for (const part of trimmed.split(";")) {
     const p = part.trim();
-    if (!p) continue;
+    if (!p) {
+      continue;
+    }
     const eq = p.indexOf("=");
-    if (eq <= 0) continue;
+    if (eq <= 0) {
+      continue;
+    }
     const k = p.slice(0, eq).trim();
     const v = p.slice(eq + 1).trim();
     if (k && v) {
@@ -91,31 +121,30 @@ export class TypstAuthManager {
   private email?: string;
 
   constructor(options: AuthManagerOptions = {}) {
-    this.appUrl = (
-      options.appUrl ??
-      process.env.TYPST_APP_URL ??
-      "https://typst.app"
-    ).replace(/\/+$/, "");
-    this.apiUrl = (
-      options.apiUrl ??
-      process.env.TYPST_API_URL ??
-      "https://api.typst.app"
-    ).replace(/\/+$/, "");
-    this.sessionFilePath =
-      options.sessionFilePath === undefined
-        ? join(homedir(), ".pi", "agent", "typst-mcp-session.json")
-        : options.sessionFilePath;
+    const rawAppUrl =
+      options.appUrl ?? process.env.TYPST_APP_URL ?? "https://typst.app";
+    const rawApiUrl =
+      options.apiUrl ?? process.env.TYPST_API_URL ?? "https://api.typst.app";
+
+    this.appUrl = rawAppUrl.replace(/\/+$/, "");
+    this.apiUrl = rawApiUrl.replace(/\/+$/, "");
+    this.sessionFilePath = resolveSessionFilePath(options.sessionFilePath);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.browserFallbackFn = options.browserFallbackFn;
 
     this.loadStoredSession();
-    if (Object.keys(this.cookies).length === 0 && process.env.TYPST_SESSION_COOKIE) {
+    if (
+      Object.keys(this.cookies).length === 0 &&
+      process.env.TYPST_SESSION_COOKIE
+    ) {
       this.setSessionCookie(process.env.TYPST_SESSION_COOKIE);
     }
   }
 
   private loadStoredSession(): void {
-    if (!this.sessionFilePath || !existsSync(this.sessionFilePath)) return;
+    if (!this.sessionFilePath || !existsSync(this.sessionFilePath)) {
+      return;
+    }
     try {
       const raw = JSON.parse(
         readFileSync(this.sessionFilePath, "utf8")
@@ -126,12 +155,14 @@ export class TypstAuthManager {
         this.email = raw.email;
       }
     } catch {
-      // ignore corrupted session file
+      // Ignore corrupted session file
     }
   }
 
   private saveStoredSession(): void {
-    if (!this.sessionFilePath) return;
+    if (!this.sessionFilePath) {
+      return;
+    }
     try {
       mkdirSync(dirname(this.sessionFilePath), { recursive: true });
       const payload: StoredSession = {
@@ -140,9 +171,13 @@ export class TypstAuthManager {
         authMethod: this.authMethod ?? "cookie",
         updatedAt: new Date().toISOString(),
       };
-      writeFileSync(this.sessionFilePath, JSON.stringify(payload, null, 2), "utf8");
+      writeFileSync(
+        this.sessionFilePath,
+        JSON.stringify(payload, null, 2),
+        "utf8"
+      );
     } catch {
-      // non-fatal if read-only fs
+      // Non-fatal if filesystem is read-only
     }
   }
 
@@ -150,7 +185,9 @@ export class TypstAuthManager {
     const parsed = parseCookieString(cookieInput);
     this.cookies = { ...this.cookies, ...parsed };
     this.authMethod = "cookie";
-    if (email) this.email = email;
+    if (email) {
+      this.email = email;
+    }
     this.saveStoredSession();
   }
 
@@ -223,8 +260,7 @@ export class TypstAuthManager {
       method: "GET",
       redirect: "manual",
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "User-Agent": DEFAULT_USER_AGENT,
       },
     });
 
@@ -254,8 +290,7 @@ export class TypstAuthManager {
         Cookie: cookieHeader,
         Origin: this.appUrl,
         Referer: `${this.appUrl}/signin/`,
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "User-Agent": DEFAULT_USER_AGENT,
       },
       body: form.toString(),
     });
@@ -296,7 +331,10 @@ export class TypstAuthManager {
     }
 
     // Step 3: Automatic fallback to cookie or browser session if Turnstile/CAPTCHA challenge occurs
-    if (options.useBrowserFallback !== false && (isChallengeOrBlocked || !this.hasSession())) {
+    if (
+      options.useBrowserFallback !== false &&
+      (isChallengeOrBlocked || !this.hasSession())
+    ) {
       if (sessionCookie) {
         this.setSessionCookie(sessionCookie, email);
         return {
@@ -328,10 +366,12 @@ export class TypstAuthManager {
       }
     }
 
+    let redirectDetail = "";
+    if (location) {
+      redirectDetail = `, redirect: ${location}`;
+    }
     throw new Error(
-      `Sign-in failed (HTTP ${signinRes.status}${
-        location ? `, redirect: ${location}` : ""
-      }). Verify TYPST_EMAIL/TYPST_PASSWORD or supply TYPST_SESSION_COOKIE.`
+      `Sign-in failed (HTTP ${signinRes.status}${redirectDetail}). Verify TYPST_EMAIL/TYPST_PASSWORD or supply TYPST_SESSION_COOKIE.`
     );
   }
 }
@@ -375,7 +415,6 @@ with sync_playwright() as p:
       `Playwright browser fallback failed: ${proc.stderr || "no output"}`
     );
   }
-  const lines = proc.stdout.trim().split(/\r?\n/);
+  const lines = proc.stdout.trim().split(/\r\n|\n/);
   return JSON.parse(lines[lines.length - 1]!) as Record<string, string>;
 };
-

@@ -126,8 +126,12 @@ typst-web-mcp/
 │   │   └── graphql.ts           # GraphQL queries, mutations, fragments & types
 │   ├── client/
 │   │   ├── auth.ts              # Direct /v1/auth/signin login, cookie jar & Playwright fallback
-│   │   └── typst-client.ts      # TypstCloudClient (REST, GraphQL, WebSocket v3, Compiler)
-│   └── index.ts                 # MCP stdio server entrypoint (16 tools)
+│   │   ├── compiler.ts          # Typst binary resolver, diagnostic parser, PDF & PNG preview compiler
+│   │   ├── errors.ts            # Structured TypstLoadError & error formatting helpers
+│   │   └── typst-client.ts      # TypstCloudClient (REST, GraphQL, WebSocket v3, Compiler facade)
+│   ├── tools/
+│   │   └── definitions.ts       # MCP JSON Schema definitions for all 16 tools
+│   └── index.ts                 # MCP stdio server entrypoint & tool dispatcher
 ├── test/
 │   └── typst-mcp.test.ts        # 7 test suites (57 assertions) covering codecs, CRDTs & E2E
 ├── LICENSE                      # MIT License
