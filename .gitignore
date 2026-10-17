@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.*
+*.log
+*.session.json
+typst-mcp-session.json
+.DS_Store
+Thumbs.db
