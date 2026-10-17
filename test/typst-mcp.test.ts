@@ -605,7 +605,7 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("exposes all 15 required MCP tools", () => {
+  test("exposes all 16 required MCP tools", () => {
     const names = TYPST_MCP_TOOLS.map((t) => t.name);
     expect(names).toEqual([
       "typst_auth_login",
@@ -623,6 +623,7 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
       "typst_rename_file",
       "typst_get_diagnostics",
       "typst_export_pdf",
+      "typst_capture_screenshot",
     ]);
   });
 
@@ -827,7 +828,25 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
     expect(exportRes.sizeBytes).toBeGreaterThan(500);
     expect(existsSync(outPdfPath)).toBe(true);
 
-    // 11. Delete project
+    // 11. Capture preview screenshot (PNG pages)
+    const outPreviewDir = join(tempDir, "preview-shots");
+    const screenshotRes = (await dispatchTypstTool(
+      client,
+      "typst_capture_screenshot",
+      {
+        projectId,
+        outputDir: outPreviewDir,
+        ppi: 144,
+        includeBase64: true,
+      }
+    )) as any;
+    expect(screenshotRes.pageCount).toBeGreaterThanOrEqual(1);
+    expect(screenshotRes.screenshots[0].pngSignatureValid).toBe(true);
+    expect(screenshotRes.screenshots[0].sizeBytes).toBeGreaterThan(500);
+    expect(typeof screenshotRes.screenshots[0].base64).toBe("string");
+    expect(existsSync(screenshotRes.screenshots[0].path)).toBe(true);
+
+    // 12. Delete project
     const delProj = (await dispatchTypstTool(client, "typst_delete_project", {
       projectId,
     })) as any;
@@ -878,7 +897,7 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
     expect(initReply?.result?.serverInfo?.name).toBe("typst-mcp");
 
     const toolsReply = lines.find((m) => m.id === 2);
-    expect(toolsReply?.result?.tools?.length).toBe(15);
+    expect(toolsReply?.result?.tools?.length).toBe(16);
     proc.kill();
   });
 

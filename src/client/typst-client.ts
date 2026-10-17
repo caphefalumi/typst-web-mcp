@@ -1,6 +1,14 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { TypstAuthManager, type AuthManagerOptions } from "./auth.ts";
 import {
@@ -73,6 +81,31 @@ export interface TypstClientOptions extends AuthManagerOptions {
   typstBin?: string;
 }
 
+export function resolveTypstBinary(explicitBin?: string): string {
+  if (explicitBin) return explicitBin;
+  if (process.env.TYPST_BIN) return process.env.TYPST_BIN;
+
+  const home = homedir();
+  const candidates = [
+    join(home, "scoop", "shims", "typst.exe"),
+    join(home, ".local", "bin", "typst.exe"),
+    join(home, ".local", "bin", "typst"),
+    join(home, "AppData", "Local", "Microsoft", "WinGet", "Links", "typst.exe"),
+    join(home, ".cargo", "bin", "typst.exe"),
+    join(home, ".cargo", "bin", "typst"),
+    "/opt/homebrew/bin/typst",
+    "/usr/local/bin/typst",
+    "/usr/bin/typst",
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return "typst";
+}
+
 export class TypstCloudClient {
   readonly auth: TypstAuthManager;
   readonly clientId: string;
@@ -87,7 +120,7 @@ export class TypstCloudClient {
     this.clientId = options.clientId ?? generateClientId(8);
     this.apiUrl = this.auth.apiUrl;
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.typstBin = options.typstBin ?? process.env.TYPST_BIN ?? "typst";
+    this.typstBin = resolveTypstBinary(options.typstBin);
 
     if (options.wsUrl) {
       this.wsBaseUrl = options.wsUrl.replace(/\/+$/, "");
@@ -934,6 +967,213 @@ export class TypstCloudClient {
         outputPath,
         sizeBytes: pdfBytes.byteLength,
         pdfHeader: pdfBytes.subarray(0, 8).toString("utf8"),
+        diagnostics,
+      };
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * Captures high-resolution PNG preview screenshots to verify the current visual status
+   * of a Typst project (`mode: "pages"` renders compiled PNG pages at `ppi` DPI via Typst;
+   * `mode: "browser"` captures the live https://typst.app/project/:id web editor + preview pane via Playwright).
+   */
+  async capturePreviewScreenshot(
+    projectId: string,
+    options?: {
+      mainFile?: string;
+      outputDir?: string;
+      pages?: string;
+      ppi?: number;
+      mode?: "pages" | "browser";
+      includeBase64?: boolean;
+    }
+  ): Promise<{
+    projectId: string;
+    mode: "pages" | "browser";
+    mainFile: string;
+    outputDir: string;
+    ppi: number;
+    pageCount: number;
+    screenshots: {
+      page: number;
+      path: string;
+      sizeBytes: number;
+      pngSignatureValid: boolean;
+      base64?: string;
+    }[];
+    diagnostics: TypstDiagnostic[];
+  }> {
+    const mode = options?.mode ?? "pages";
+    const ppi = options?.ppi ?? 144;
+
+    if (mode === "browser") {
+      const outputDir = options?.outputDir
+        ? resolve(options.outputDir)
+        : mkdtempSync(join(tmpdir(), `typst-preview-ui-${projectId}-`));
+      mkdirSync(outputDir, { recursive: true });
+      const screenshotPath = join(outputDir, `typst-app-${projectId}.png`);
+      const cookieHeader = this.auth.getCookieHeader();
+
+      const pyScript = `
+import os
+from playwright.sync_api import sync_playwright
+
+app_url = os.environ["TYPST_PREVIEW_APP_URL"]
+proj_id = os.environ["TYPST_PREVIEW_PROJ_ID"]
+out_path = os.environ["TYPST_PREVIEW_OUT"]
+raw_cookie = os.environ.get("TYPST_PREVIEW_COOKIE", "")
+
+cookies = []
+for part in raw_cookie.split(";"):
+    part = part.strip()
+    if "=" in part:
+        k, v = part.split("=", 1)
+        cookies.append({
+            "name": k.strip(),
+            "value": v.strip(),
+            "domain": "typst.app",
+            "path": "/",
+            "secure": True,
+        })
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(channel="msedge", headless=True)
+    ctx = browser.new_context(viewport={"width": 1920, "height": 1080}, device_scale_factor=2)
+    if cookies:
+        ctx.add_cookies(cookies)
+    page = ctx.new_page()
+    page.goto(f"{app_url}/project/{proj_id}", wait_until="networkidle", timeout=60000)
+    page.wait_for_timeout(3000)
+    page.screenshot(path=out_path, full_page=False)
+    browser.close()
+`;
+      const proc = spawnSync("python", ["-c", pyScript], {
+        env: {
+          ...process.env,
+          TYPST_PREVIEW_APP_URL: this.auth.appUrl,
+          TYPST_PREVIEW_PROJ_ID: projectId,
+          TYPST_PREVIEW_OUT: screenshotPath,
+          TYPST_PREVIEW_COOKIE: cookieHeader,
+        },
+        encoding: "utf8",
+        timeout: 65000,
+      });
+
+      if (proc.status !== 0 || !existsSync(screenshotPath)) {
+        throw new TypstLoadError(
+          ["BROWSER_SCREENSHOT_FAILED"],
+          `Failed to capture live browser preview screenshot: ${proc.stderr || "unknown error"}`
+        );
+      }
+
+      const bytes = readFileSync(screenshotPath);
+      const isPng =
+        bytes.byteLength >= 8 &&
+        bytes[0] === 0x89 &&
+        bytes[1] === 0x50 &&
+        bytes[2] === 0x4e &&
+        bytes[3] === 0x47;
+
+      return {
+        projectId,
+        mode: "browser",
+        mainFile: options?.mainFile ?? "main.typ",
+        outputDir,
+        ppi,
+        pageCount: 1,
+        screenshots: [
+          {
+            page: 1,
+            path: screenshotPath,
+            sizeBytes: bytes.byteLength,
+            pngSignatureValid: isPng,
+            base64: options?.includeBase64 ? bytes.toString("base64") : undefined,
+          },
+        ],
+        diagnostics: [],
+      };
+    }
+
+    const { workspaceDir, mainFileName, project } =
+      await this.materializeProjectWorkspace(projectId, options?.mainFile);
+    try {
+      const safeName =
+        project.name.replace(/[^a-zA-Z0-9._-]+/g, "_") || projectId;
+      const outputDir = options?.outputDir
+        ? resolve(options.outputDir)
+        : mkdtempSync(join(tmpdir(), `typst-preview-${safeName}-`));
+      mkdirSync(outputDir, { recursive: true });
+
+      const outputTemplate = join(outputDir, "page-{0p}.png");
+      const args = [
+        "compile",
+        "--format",
+        "png",
+        "--ppi",
+        String(ppi),
+        "--diagnostic-format",
+        "short",
+        "--root",
+        workspaceDir,
+      ];
+      if (options?.pages && options.pages !== "all") {
+        args.push("--pages", options.pages);
+      }
+      args.push(join(workspaceDir, mainFileName), outputTemplate);
+
+      const proc = spawnSync(this.typstBin, args, {
+        cwd: workspaceDir,
+        encoding: "utf8",
+      });
+
+      const combinedOutput = `${proc.stderr ?? ""}\n${proc.stdout ?? ""}`;
+      const diagnostics = TypstCloudClient.parseShortDiagnostics(combinedOutput);
+
+      if (proc.status !== 0) {
+        throw new TypstLoadError(
+          ["PREVIEW_SCREENSHOT_COMPILATION_FAILED"],
+          `Failed to render PNG preview for ${mainFileName}: ${
+            diagnostics
+              .map((d) => `${d.path}:${d.line}:${d.column} ${d.message}`)
+              .join("; ") || combinedOutput.trim()
+          }`
+        );
+      }
+
+      const files = readdirSync(outputDir)
+        .filter((f) => /^page-\d+\.png$/i.test(f))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+      const screenshots = files.map((fileName, idx) => {
+        const fullPath = join(outputDir, fileName);
+        const bytes = readFileSync(fullPath);
+        const pageMatch = fileName.match(/page-(\d+)\.png/i);
+        const pageNum = pageMatch ? Number.parseInt(pageMatch[1]!, 10) : idx + 1;
+        const isPng =
+          bytes.byteLength >= 8 &&
+          bytes[0] === 0x89 &&
+          bytes[1] === 0x50 &&
+          bytes[2] === 0x4e &&
+          bytes[3] === 0x47;
+        return {
+          page: pageNum,
+          path: fullPath,
+          sizeBytes: bytes.byteLength,
+          pngSignatureValid: isPng,
+          base64: options?.includeBase64 ? bytes.toString("base64") : undefined,
+        };
+      });
+
+      return {
+        projectId,
+        mode: "pages",
+        mainFile: mainFileName,
+        outputDir,
+        ppi,
+        pageCount: screenshots.length,
+        screenshots,
         diagnostics,
       };
     } finally {

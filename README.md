@@ -42,7 +42,7 @@ See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered
 
 ---
 
-## MCP Tools (15 Tools)
+## MCP Tools (16 Tools)
 
 | Category | Tool Name | Description |
 |:---|:---|:---|
@@ -61,6 +61,7 @@ See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered
 | **Assets & Tree** | `typst_delete_file` | Delete a file or binary asset from a project (`DeleteFilesMutation`). |
 | **Compiler** | `typst_get_diagnostics` | Sync all cloud files and run `typst compile` to return structured errors, warnings, line/column spans, and hints. |
 | **Compiler** | `typst_export_pdf` | Sync all cloud text & binary assets, compile the project to PDF, and save to `outputPath`. |
+| **Preview** | `typst_capture_screenshot` | Capture high-DPI PNG preview screenshots (`mode="pages"` renders compiled PNG pages; `mode="browser"` screenshots the live `typst.app` web UI). |
 
 ---
 

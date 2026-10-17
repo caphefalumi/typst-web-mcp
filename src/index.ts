@@ -351,6 +351,50 @@ export const TYPST_MCP_TOOLS: Tool[] = [
       required: ["projectId"],
     },
   },
+  {
+    name: "typst_capture_screenshot",
+    description:
+      "Capture high-resolution PNG preview screenshots to verify the visual status of a https://typst.app project (mode='pages' renders compiled PNG pages via Typst; mode='browser' captures the live typst.app web editor & preview pane via Playwright).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: {
+          type: "string",
+          description: "The Typst project ID",
+        },
+        mainFile: {
+          type: "string",
+          description: "Optional main .typ entry file override",
+        },
+        outputDir: {
+          type: "string",
+          description:
+            "Optional directory path to save the rendered PNG screenshot files",
+        },
+        pages: {
+          type: "string",
+          description:
+            "Page range to capture, e.g. '1', '1-3', '1,4', or 'all' (default: 'all')",
+        },
+        ppi: {
+          type: "number",
+          description: "Pixels per inch resolution for rendered PNGs (default: 144)",
+        },
+        mode: {
+          type: "string",
+          enum: ["pages", "browser"],
+          description:
+            "'pages' (default) compiles high-DPI PNG pages from synced project files; 'browser' captures the live https://typst.app/project/:id UI",
+        },
+        includeBase64: {
+          type: "boolean",
+          description:
+            "Include base64-encoded PNG data in response for direct vision inspection (default: false)",
+        },
+      },
+      required: ["projectId"],
+    },
+  },
 ];
 
 export async function dispatchTypstTool(
@@ -467,6 +511,16 @@ export async function dispatchTypstTool(
       return await client.exportPdf(String(args.projectId), {
         mainFile: args.mainFile as string | undefined,
         outputPath: args.outputPath as string | undefined,
+      });
+
+    case "typst_capture_screenshot":
+      return await client.capturePreviewScreenshot(String(args.projectId), {
+        mainFile: args.mainFile as string | undefined,
+        outputDir: args.outputDir as string | undefined,
+        pages: args.pages as string | undefined,
+        ppi: typeof args.ppi === "number" ? args.ppi : undefined,
+        mode: (args.mode as "pages" | "browser" | undefined) ?? "pages",
+        includeBase64: Boolean(args.includeBase64),
       });
 
     default:
