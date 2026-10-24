@@ -7,3 +7,4 @@ dist/
 typst-mcp-session.json
 .DS_Store
 Thumbs.db
+.pi-glla

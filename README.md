@@ -145,7 +145,7 @@ Same flow as [Canvas-CLI](https://github.com/caphefalumi/Canvas-CLI):
 1. Bump `version` in `package.json` (must not match a version already on npm).
 2. Commit, push, and create a GitHub **Release** for that tag — or run **Actions → Publish → Run workflow** (`workflow_dispatch`).
 
-[`.github/workflows/npm-publish.yml`](./.github/workflows/npm-publish.yml) runs on the `npm-publish` GitHub environment: `bun ci`, `bun run build`, then `npm publish --access public` via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC). The publish step clears `NODE_AUTH_TOKEN` so the CLI uses GitHub OIDC instead of a stale token from `setup-node`.
+[`.github/workflows/npm-publish.yml`](./.github/workflows/npm-publish.yml) runs the same checks as CI (`bun test`, including smoke) in a `test` job; the `publish` job runs only if that passes, on the `npm-publish` environment: `bun ci`, `bun run build`, then `npm publish --access public` via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC). The publish step clears `NODE_AUTH_TOKEN` so the CLI uses GitHub OIDC instead of a stale token from `setup-node`.
 
 **Trusted publisher (maintainers):** package [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) → Settings → Trusted publishing → GitHub Actions — user/org `caphefalumi`, repo `typst-web-mcp`, workflow file `npm-publish.yml`, environment `npm-publish`, allow **npm publish**.
 
