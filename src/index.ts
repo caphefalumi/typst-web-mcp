@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./node-shim.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
