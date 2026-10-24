@@ -21,6 +21,55 @@ Install from npm as [`typst-mcp`](https://www.npmjs.com/package/typst-mcp). Sour
 
 ---
 
+## Quick Start
+
+### Prerequisites
+
+- [**Node.js**](https://nodejs.org/) `>= 18` (for `npx` install) or [**Bun**](https://bun.sh) `>= 1.2` (for local development)
+- [**Typst CLI**](https://github.com/typst/typst) (`typst` on `PATH` for `typst_get_diagnostics` and `typst_export_pdf`)
+
+### Installation
+
+**Recommended — no clone, no global install:**
+
+```bash
+npx -y typst-mcp
+```
+
+Runs the published [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) package (Node `>= 18`). Use the same command in MCP config below. `-y` skips the npx install prompt.
+
+**From source (development):**
+
+```bash
+git clone https://github.com/caphefalumi/typst-web-mcp.git
+cd typst-web-mcp
+bun install
+bun run dev
+```
+
+### MCP Client Configuration
+
+Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, `claude_desktop_config.json`, or `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "typst-mcp": {
+      "command": "npx",
+      "args": ["-y", "typst-mcp"],
+      "env": {
+        "TYPST_EMAIL": "your-email@example.com",
+        "TYPST_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
+
+> **Session Persistence:** Once authenticated via `typst_auth_login` (or environment variables), the `__Http-typst-session` cookie is cached locally at `~/.pi/agent/typst-mcp-session.json` so subsequent tool calls authenticate automatically without re-signing in.
+
+---
+
 ## Overview
 
 `typst-web-mcp` connects AI coding and writing agents directly to collaborative [**typst.app**](https://typst.app) cloud projects. Instead of relying on brittle browser DOM scraping, it implements the native `typst.app` client protocol:
@@ -68,55 +117,6 @@ See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered
 | **Compiler** | `typst_get_diagnostics` | Sync all cloud files and run `typst compile` to return structured errors, warnings, line/column spans, and hints. |
 | **Compiler** | `typst_export_pdf` | Sync all cloud text & binary assets, compile the project to PDF, and save to `outputPath`. |
 | **Preview** | `typst_capture_screenshot` | Capture high-DPI PNG preview screenshots (`mode="pages"` renders compiled PNG pages; `mode="browser"` screenshots the live `typst.app` web UI). |
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- [**Node.js**](https://nodejs.org/) `>= 18` (for `npx` install) or [**Bun**](https://bun.sh) `>= 1.2` (for local development)
-- [**Typst CLI**](https://github.com/typst/typst) (`typst` on `PATH` for `typst_get_diagnostics` and `typst_export_pdf`)
-
-### Installation
-
-**Recommended — no clone, no global install:**
-
-```bash
-npx -y typst-mcp
-```
-
-Runs the published [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) package (Node `>= 18`). Use the same command in MCP config below. `-y` skips the npx install prompt.
-
-**From source (development):**
-
-```bash
-git clone https://github.com/caphefalumi/typst-web-mcp.git
-cd typst-web-mcp
-bun install
-bun run dev
-```
-
-### MCP Client Configuration
-
-Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, `claude_desktop_config.json`, or `.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "typst-mcp": {
-      "command": "npx",
-      "args": ["-y", "typst-mcp"],
-      "env": {
-        "TYPST_EMAIL": "your-email@example.com",
-        "TYPST_PASSWORD": "your-password"
-      }
-    }
-  }
-}
-```
-
-> **Session Persistence:** Once authenticated via `typst_auth_login` (or environment variables), the `__Http-typst-session` cookie is cached locally at `~/.pi/agent/typst-mcp-session.json` so subsequent tool calls authenticate automatically without re-signing in.
 
 ---
 
