@@ -1,10 +1,13 @@
 <div align="center">
 
-# Typst Web MCP (`typst-web-mcp`)
+# Typst Web MCP
 
-**Model Context Protocol (MCP) Server for [`https://typst.app`](https://typst.app) Cloud Collaboration, Real-Time Yjs CRDT Editing & Compiler Diagnostics**
+**Model Context Protocol (MCP) server for [`https://typst.app`](https://typst.app) — cloud projects, Yjs CRDT editing, and Typst compiler diagnostics**
+
+Install from npm as [`typst-mcp`](https://www.npmjs.com/package/typst-mcp). Source repo: [`typst-web-mcp`](https://github.com/caphefalumi/typst-web-mcp).
 
 [![npm version](https://img.shields.io/npm/v/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
+[![Downloads](https://img.shields.io/npm/dt/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
 [![Node.js Package](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml)
 [![Runtime: Bun](https://img.shields.io/badge/Runtime-Bun_%E2%89%A51.2-f9f1e1?style=flat-square&logo=bun&logoColor=black)](https://bun.sh)
@@ -33,7 +36,7 @@
 
 ```mermaid
 flowchart LR
-    Agent["AI Agent\n(Pi / Claude / Cursor)"] <-->|"JSON-RPC (stdio)"| MCP["typst-web-mcp\n(Bun / TypeScript)"]
+    Agent["AI Agent\n(Pi / Claude / Cursor)"] <-->|"JSON-RPC (stdio)"| MCP["typst-mcp\n(Node / TypeScript)"]
     MCP <-->|"GraphQL (/v1/graphql)\n+ X-Typst-Preflight"| API["https://api.typst.app"]
     MCP <-->|"REST Yjs & Blobs\n(/v1/files/:pid/:fid/yjs)"| API
     MCP <-->|"Binary lib0 WebSocket\n(wss://api.typst.app/editing/v3)"| WS["typst.app Real-Time Sync"]
@@ -82,7 +85,7 @@ See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered
 npx -y typst-mcp
 ```
 
-Use that same `npx -y typst-mcp` command in MCP config (see below). `-y` skips the install prompt.
+Runs the published [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) package (Node `>= 18`). Use the same command in MCP config below. `-y` skips the npx install prompt.
 
 **From source (development):**
 
@@ -131,9 +134,14 @@ bun test
 
 ### Publishing to npm
 
-Matches [Canvas-CLI](https://github.com/caphefalumi/Canvas-CLI): GitHub **Release created** (or manual **workflow_dispatch**) runs [`.github/workflows/npm-publish.yml`](./.github/workflows/npm-publish.yml) — `bun ci`, `bun run build`, `npm publish` with OIDC environment `npm-publish` on npmjs.com.
+Same flow as [Canvas-CLI](https://github.com/caphefalumi/Canvas-CLI):
 
-**One-time (new package name):** on [npmjs.com](https://www.npmjs.com) add a **Trusted Publisher** for package `typst-mcp` — GitHub Actions, org/user `caphefalumi`, repo `typst-web-mcp`, workflow `npm-publish.yml`, environment `npm-publish`, allow **npm publish**. First successful CI publish must happen within 2 days of creating that config.
+1. Bump `version` in `package.json` (must not match a version already on npm).
+2. Commit, push, and create a GitHub **Release** for that tag — or run **Actions → Publish → Run workflow** (`workflow_dispatch`).
+
+[`.github/workflows/npm-publish.yml`](./.github/workflows/npm-publish.yml) runs on the `npm-publish` GitHub environment: `bun ci`, `bun run build`, then `npm publish --access public` via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC). The publish step clears `NODE_AUTH_TOKEN` so the CLI uses GitHub OIDC instead of a stale token from `setup-node`.
+
+**Trusted publisher (maintainers):** package [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) → Settings → Trusted publishing → GitHub Actions — user/org `caphefalumi`, repo `typst-web-mcp`, workflow file `npm-publish.yml`, environment `npm-publish`, allow **npm publish**.
 
 ### Project Structure
 
@@ -153,7 +161,7 @@ typst-web-mcp/
 │   │   └── typst-client.ts      # TypstCloudClient (REST, GraphQL, WebSocket v3, Compiler facade)
 │   ├── tools/
 │   │   └── definitions.ts       # MCP JSON Schema definitions for all 16 tools
-│   └── index.ts                 # MCP stdio server entrypoint & tool dispatcher
+│   └── index.ts                 # MCP stdio server entrypoint (dev); npm bin runs dist/index.js
 ├── test/
 │   └── typst-mcp.test.ts        # 7 test suites (57 assertions) covering codecs, CRDTs & E2E
 ├── LICENSE                      # MIT License
