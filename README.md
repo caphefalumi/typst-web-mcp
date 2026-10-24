@@ -7,7 +7,6 @@
 [![npm version](https://img.shields.io/npm/v/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
 [![Downloads](https://img.shields.io/npm/dt/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
-[![CI](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/ci.yml)
 [![Node.js Package](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml)
 
 </div>
