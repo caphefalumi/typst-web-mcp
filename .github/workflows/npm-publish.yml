@@ -23,4 +23,5 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun ci
       - run: bun run build
-      - run: npm stage publish --access public
+      - name: Publish to npm (OIDC)
+        run: env -u NODE_AUTH_TOKEN npm publish --access public
