@@ -4,8 +4,6 @@
 
 **Model Context Protocol (MCP) server for [`https://typst.app`](https://typst.app) — cloud projects, Yjs CRDT editing, and Typst compiler diagnostics**
 
-Install from npm as [`typst-mcp`](https://www.npmjs.com/package/typst-mcp). Source repo: [`typst-web-mcp`](https://github.com/caphefalumi/typst-web-mcp).
-
 [![npm version](https://img.shields.io/npm/v/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
 [![Downloads](https://img.shields.io/npm/dt/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
