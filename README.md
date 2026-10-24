@@ -9,6 +9,7 @@ Install from npm as [`typst-mcp`](https://www.npmjs.com/package/typst-mcp). Sour
 [![npm version](https://img.shields.io/npm/v/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
 [![Downloads](https://img.shields.io/npm/dt/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
+[![CI](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/ci.yml)
 [![Node.js Package](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml)
 [![Runtime: Bun](https://img.shields.io/badge/Runtime-Bun_%E2%89%A51.2-f9f1e1?style=flat-square&logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -128,9 +129,14 @@ bun run build
 # Typecheck with strict TypeScript
 bun run typecheck
 
-# Run full unit, mock server, and live api.typst.app protocol test suite
+# Full suite (includes test/smoke.test.ts: dist bin + npx -y typst-mcp)
 bun test
+
+# Smoke only (same as pi npx MCP config)
+bun run test:smoke
 ```
+
+Push/PR to `main` runs [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) (`bun ci`, build, typecheck, `bun test`).
 
 ### Publishing to npm
 

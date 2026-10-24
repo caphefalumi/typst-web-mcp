@@ -1,6 +1,6 @@
 {
   "name": "typst-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Model Context Protocol (MCP) server for https://typst.app/ cloud projects, Yjs real-time text editing, asset management, and Typst compiler diagnostics",
   "keywords": [
     "mcp",
@@ -41,6 +41,7 @@
     "dev": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:smoke": "bun test test/smoke.test.ts",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {

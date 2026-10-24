@@ -2,6 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 import * as Y from "yjs";
 import {
   decodeMessage,
@@ -863,7 +866,7 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
   }, 20000);
 
   test("spawns MCP server over JSON-RPC stdio and responds to initialize and tools/list", async () => {
-    const proc = Bun.spawn(["bun", "C:/Users/Toan/typst-mcp/src/index.ts"], {
+    const proc = Bun.spawn(["bun", join(repoRoot, "src/index.ts")], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
