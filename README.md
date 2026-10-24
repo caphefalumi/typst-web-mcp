@@ -11,11 +11,6 @@ Install from npm as [`typst-mcp`](https://www.npmjs.com/package/typst-mcp). Sour
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
 [![CI](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/ci.yml)
 [![Node.js Package](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml)
-[![Runtime: Bun](https://img.shields.io/badge/Runtime-Bun_%E2%89%A51.2-f9f1e1?style=flat-square&logo=bun&logoColor=black)](https://bun.sh)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![MCP SDK](https://img.shields.io/badge/MCP-2024--11--05-10a37f?style=flat-square)](https://modelcontextprotocol.io)
-[![Protocol: Yjs + lib0](https://img.shields.io/badge/CRDT-Yjs_%2B_lib0_v3-ff69b4?style=flat-square)](./docs/PROTOCOL.md)
-[![Tests](https://img.shields.io/badge/Tests-7_Passing_(57_Assertions)-2ea44f?style=flat-square)](./test/typst-mcp.test.ts)
 
 </div>
 
