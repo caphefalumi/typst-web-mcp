@@ -4,7 +4,9 @@
 
 **Model Context Protocol (MCP) Server for [`https://typst.app`](https://typst.app) Cloud Collaboration, Real-Time Yjs CRDT Editing & Compiler Diagnostics**
 
+[![npm version](https://img.shields.io/npm/v/typst-mcp.svg?style=flat-square)](https://www.npmjs.com/package/typst-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](./LICENSE)
+[![Node.js Package](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/caphefalumi/typst-web-mcp/actions/workflows/npm-publish.yml)
 [![Runtime: Bun](https://img.shields.io/badge/Runtime-Bun_%E2%89%A51.2-f9f1e1?style=flat-square&logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP SDK](https://img.shields.io/badge/MCP-2024--11--05-10a37f?style=flat-square)](https://modelcontextprotocol.io)
@@ -69,15 +71,26 @@ See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered
 
 ### Prerequisites
 
-- [**Bun**](https://bun.sh) `>= 1.2`
+- [**Node.js**](https://nodejs.org/) `>= 18` (for `npx` install) or [**Bun**](https://bun.sh) `>= 1.2` (for local development)
 - [**Typst CLI**](https://github.com/typst/typst) (`typst` on `PATH` for `typst_get_diagnostics` and `typst_export_pdf`)
 
 ### Installation
+
+**Recommended — no clone, no global install:**
+
+```bash
+npx -y typst-mcp
+```
+
+Use that same `npx -y typst-mcp` command in MCP config (see below). `-y` skips the install prompt.
+
+**From source (development):**
 
 ```bash
 git clone https://github.com/caphefalumi/typst-web-mcp.git
 cd typst-web-mcp
 bun install
+bun run dev
 ```
 
 ### MCP Client Configuration
@@ -88,8 +101,8 @@ Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, 
 {
   "mcpServers": {
     "typst-mcp": {
-      "command": "bun",
-      "args": ["/absolute/path/to/typst-web-mcp/src/index.ts"],
+      "command": "npx",
+      "args": ["-y", "typst-mcp"],
       "env": {
         "TYPST_EMAIL": "your-email@example.com",
         "TYPST_PASSWORD": "your-password"
@@ -106,12 +119,19 @@ Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, 
 ## Development & Verification
 
 ```bash
+# Compile publishable output to dist/
+bun run build
+
 # Typecheck with strict TypeScript
 bun run typecheck
 
 # Run full unit, mock server, and live api.typst.app protocol test suite
 bun test
 ```
+
+### Publishing to npm
+
+Matches [Canvas-CLI](https://github.com/caphefalumi/Canvas-CLI): GitHub **Release created** (or manual **workflow_dispatch**) runs [`.github/workflows/npm-publish.yml`](./.github/workflows/npm-publish.yml) — `bun ci`, `bun run build`, `npm publish` with OIDC environment `npm-publish` on npmjs.com.
 
 ### Project Structure
 

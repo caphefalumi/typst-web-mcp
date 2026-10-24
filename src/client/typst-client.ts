@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { TypstAuthManager, type AuthManagerOptions } from "./auth.ts";
-import { TypstLoadError, formatUnknownError } from "./errors.ts";
+import { TypstAuthManager, type AuthManagerOptions } from "./auth.js";
+import { TypstLoadError, formatUnknownError } from "./errors.js";
 import {
   captureBrowserPreviewScreenshot,
   captureWorkspacePageScreenshots,
@@ -12,7 +12,7 @@ import {
   resolveTypstBinary,
   type PreviewScreenshotItem,
   type TypstDiagnostic,
-} from "./compiler.ts";
+} from "./compiler.js";
 import {
   CREATE_PROJECT_MUTATION,
   DASHBOARD_CONTENT_QUERY,
@@ -23,18 +23,18 @@ import {
   type TypstFileMeta,
   type TypstProjectDetail,
   type TypstProjectSummary,
-} from "../protocol/graphql.ts";
+} from "../protocol/graphql.js";
 import {
   decodeYjsText,
   editYjsText,
   replaceYjsText,
   type TextEditOperation,
-} from "../protocol/yjs-doc.ts";
+} from "../protocol/yjs-doc.js";
 import {
   decodeMessage,
   encodeMessage,
   MessageKind,
-} from "../protocol/ws-codec.ts";
+} from "../protocol/ws-codec.js";
 
 export { TypstLoadError, resolveTypstBinary, type TypstDiagnostic };
 

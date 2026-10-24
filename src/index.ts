@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -10,9 +10,9 @@ import {
 import {
   TypstCloudClient,
   type TypstClientOptions,
-} from "./client/typst-client.ts";
-import { formatUnknownError } from "./client/errors.ts";
-import { TYPST_MCP_TOOLS } from "./tools/definitions.ts";
+} from "./client/typst-client.js";
+import { formatUnknownError } from "./client/errors.js";
+import { TYPST_MCP_TOOLS } from "./tools/definitions.js";
 
 export { TYPST_MCP_TOOLS };
 

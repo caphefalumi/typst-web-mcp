@@ -8,7 +8,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { TypstLoadError } from "./errors.ts";
+import { TypstLoadError } from "./errors.js";
 
 export interface TypstDiagnostic {
   path: string;

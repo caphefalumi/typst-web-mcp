@@ -2,15 +2,46 @@
   "name": "typst-mcp",
   "version": "1.0.0",
   "description": "Model Context Protocol (MCP) server for https://typst.app/ cloud projects, Yjs real-time text editing, asset management, and Typst compiler diagnostics",
+  "keywords": [
+    "mcp",
+    "typst",
+    "typst.app",
+    "yjs",
+    "model-context-protocol"
+  ],
+  "homepage": "https://github.com/caphefalumi/typst-web-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/caphefalumi/typst-web-mcp/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "caphefalumi",
+    "email": "dangduytoan13l@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caphefalumi/typst-web-mcp.git"
+  },
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "bin": {
-    "typst-mcp": "./src/index.ts"
+    "typst-mcp": "dist/index.js"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
   },
   "scripts": {
-    "start": "bun run src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.0",
@@ -20,6 +51,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/node": "^25.0.3",
     "typescript": "^5.8.2"
   }
 }
