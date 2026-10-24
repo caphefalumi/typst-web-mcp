@@ -133,6 +133,8 @@ bun test
 
 Matches [Canvas-CLI](https://github.com/caphefalumi/Canvas-CLI): GitHub **Release created** (or manual **workflow_dispatch**) runs [`.github/workflows/npm-publish.yml`](./.github/workflows/npm-publish.yml) — `bun ci`, `bun run build`, `npm publish` with OIDC environment `npm-publish` on npmjs.com.
 
+**One-time (new package name):** on [npmjs.com](https://www.npmjs.com) add a **Trusted Publisher** for package `typst-mcp` — GitHub Actions, org/user `caphefalumi`, repo `typst-web-mcp`, workflow `npm-publish.yml`, environment `npm-publish`, allow **npm publish**. First successful CI publish must happen within 2 days of creating that config.
+
 ### Project Structure
 
 ```text
