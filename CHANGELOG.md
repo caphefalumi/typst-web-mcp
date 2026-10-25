@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Use the shared file ID mutation lock for existing whole-file writes, including writes addressed by path.
 - Keep continuation instructions and duplicated truncation text out of read content; preserve full source bytes across pages without phantom trailing lines.
 - Skip saves when replacements leave the file unchanged, and report an error for a missing explicitly requested text file.
+- Match native JavaScript regex replacement tokens without treating match offset/input metadata as capture groups.
 
 ### Changed
 - Text reads default to 200 lines/16 KiB with `nextOffset` continuation and validated positive integer limits. Explicit `limit`/`maxBytes` can request larger pages.
@@ -32,6 +33,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **Typst Web Cloud Diagnostics Fallback**: Zero-binary diagnostics fallback using live Typst Web compiler when local `typst` CLI binary is not present on `PATH`.
+### Commits
+
+- feat: bump version to 1.2.0 (f4c40b7)
+- feat(compiler): support Typst Web cloud diagnostics with zero-binary fallback (e467647)
+- docs(readme): remove architecture diagram and project structure sections (d6c1cbb)
+- docs(readme): present standard and @latest options for npx install and config (77b63fb)
+- docs(readme): add @latest to npx install and MCP client config (0cdd913)
 
 ## [1.1.0] - 2026-10-25
 
