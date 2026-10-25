@@ -18,7 +18,7 @@
 ### Prerequisites
 
 - [**Node.js**](https://nodejs.org/) `>= 18` (for `npx` install) or [**Bun**](https://bun.sh) `>= 1.2` (for local development)
-- [**Typst CLI**](https://github.com/typst/typst) (`typst` on `PATH` for `typst_get_diagnostics` and `typst_export_pdf`)
+- [**Typst CLI**](https://github.com/typst/typst) (optional: `typst` on `PATH` for local CLI compilation speed; if not installed, `typst_get_diagnostics` automatically uses Typst Web cloud compiler diagnostics)
 
 ### Installation
 
@@ -101,7 +101,7 @@ Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, 
 | **Assets & Tree** | `typst_upload_asset` | Upload or replace binary assets (`PNG`, `JPG`, `SVG`, `PDF`, fonts) from a local path or base64 payload. |
 | **Assets & Tree** | `typst_rename_file` | Rename or move a file inside a `typst.app` project (`UpdatesFileMutation`). |
 | **Assets & Tree** | `typst_delete_file` | Delete a file or binary asset from a project (`DeleteFilesMutation`). |
-| **Compiler** | `typst_get_diagnostics` | Sync all cloud files and run `typst compile` to return structured errors, warnings, line/column spans, and hints. |
+| **Compiler** | `typst_get_diagnostics` | Retrieve compiler diagnostics (errors, warnings, line/column numbers, and hints). Supports both local Typst CLI (`mode="cli"`) and Typst Web cloud compiler (`mode="web"`), with automatic fallback (`mode="auto"`). |
 | **Compiler** | `typst_export_pdf` | Sync all cloud text & binary assets, compile the project to PDF, and save to `outputPath`. |
 | **Preview** | `typst_capture_screenshot` | Capture high-DPI PNG preview screenshots (`mode="pages"` renders compiled PNG pages; `mode="browser"` screenshots the live `typst.app` web UI). |
 

@@ -184,10 +184,10 @@ export async function dispatchTypstTool(
       );
 
     case "typst_get_diagnostics":
-      return await client.getDiagnostics(
-        String(args.projectId),
-        args.mainFile as string | undefined
-      );
+      return await client.getDiagnostics(String(args.projectId), {
+        mainFile: args.mainFile as string | undefined,
+        mode: args.mode as "auto" | "cli" | "web" | undefined,
+      });
 
     case "typst_export_pdf":
       return await client.exportPdf(String(args.projectId), {

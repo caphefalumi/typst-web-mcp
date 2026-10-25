@@ -322,7 +322,7 @@ export const TYPST_MCP_TOOLS: Tool[] = [
   {
     name: "typst_get_diagnostics",
     description:
-      "Synchronize all files from a https://typst.app project and run the Typst compiler to retrieve structured errors, warnings, line/column numbers, and hints.",
+      "Retrieve compiler diagnostics (errors, warnings, line/column numbers, and hints) for a https://typst.app project. Supports both local Typst CLI compilation (fastest) and Typst Web cloud diagnostics (zero-binary fallback using typst.app cloud compiler).",
     inputSchema: {
       type: "object",
       properties: {
@@ -334,6 +334,12 @@ export const TYPST_MCP_TOOLS: Tool[] = [
           type: "string",
           description:
             "Optional main .typ entry file override (defaults to project previewed file or main.typ)",
+        },
+        mode: {
+          type: "string",
+          enum: ["auto", "cli", "web"],
+          description:
+            "Diagnostics mode: 'auto' (prefers local Typst CLI if installed, falls back to Typst Web cloud compiler), 'cli' (requires local typst binary), or 'web' (uses Typst Web cloud compiler). Defaults to 'auto'.",
         },
       },
       required: ["projectId"],

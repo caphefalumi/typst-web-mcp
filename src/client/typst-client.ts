@@ -5,9 +5,11 @@ import { TypstAuthManager, type AuthManagerOptions } from "./auth.js";
 import { TypstLoadError, formatUnknownError } from "./errors.js";
 import {
   captureBrowserPreviewScreenshot,
+  captureWebDiagnostics,
   captureWorkspacePageScreenshots,
   compileWorkspaceDiagnostics,
   compileWorkspacePdf,
+  hasTypstBinary,
   parseShortDiagnostics,
   resolveTypstBinary,
   type PreviewScreenshotItem,
@@ -18,6 +20,7 @@ import {
   DASHBOARD_CONTENT_QUERY,
   DELETE_FILES_MUTATION,
   DELETE_PROJECT_MUTATION,
+  EDIT_PROJECT_MUTATION,
   PROJECT_FILES_QUERY,
   UPDATE_FILES_MUTATION,
   type TypstFileMeta,
@@ -991,28 +994,148 @@ export class TypstCloudClient {
     return parseShortDiagnostics(stderrText);
   }
 
-  async getDiagnostics(
+  async updateProject(
+    projectId: string,
+    updates: {
+      name?: string;
+      previewed?: string;
+      pinnedVersion?: string;
+    }
+  ): Promise<{
+    id: string;
+    name: string;
+    previewed: string | null;
+    pinnedVersion: string | null;
+  }> {
+    const res = await this.graphql<{
+      updateProject: {
+        id: string;
+        name: string;
+        previewed: string | null;
+        pinnedVersion: string | null;
+      };
+    }>(EDIT_PROJECT_MUTATION, {
+      projectId,
+      name: updates.name,
+      previewed: updates.previewed,
+      pinnedVersion: updates.pinnedVersion,
+    });
+    return res.updateProject;
+  }
+
+  async getWebDiagnostics(
     projectId: string,
     mainFile?: string
   ): Promise<{
     projectId: string;
     mainFile: string;
+    mode: "web";
     success: boolean;
     errorCount: number;
     warningCount: number;
     diagnostics: TypstDiagnostic[];
   }> {
-    const { workspaceDir, mainFileName } =
-      await this.materializeProjectWorkspace(projectId, mainFile);
+    const project = await this.getProject(projectId);
+    let effectiveMainFile = mainFile;
+    if (!effectiveMainFile) {
+      const previewedFile = project.files.find(
+        (f) => f.id === project.previewed
+      );
+      effectiveMainFile = previewedFile?.name ?? "main.typ";
+    } else {
+      const requestedFile = project.files.find(
+        (f) => f.name === mainFile || f.id === mainFile
+      );
+      if (requestedFile && requestedFile.id !== project.previewed) {
+        try {
+          await this.updateProject(projectId, { previewed: requestedFile.id });
+        } catch {
+          // If permission denied or mutation rejected, proceed anyway
+        }
+      }
+    }
+
+    const fileContents: Record<string, string> = {};
+    for (const f of project.files) {
+      if (f.isMultiplayable) {
+        try {
+          const res = await this.readFile(projectId, f.name);
+          if (res.encoding === "utf-8" && typeof res.content === "string") {
+            fileContents[f.name] = res.content;
+          }
+        } catch {
+          // Ignore read failures for auxiliary files
+        }
+      }
+    }
+
+    return captureWebDiagnostics({
+      appUrl: this.auth.appUrl,
+      projectId,
+      cookieHeader: this.auth.getCookieHeader(),
+      mainFile: effectiveMainFile,
+      fileContents,
+    });
+  }
+
+  async getDiagnostics(
+    projectId: string,
+    options?:
+      | string
+      | {
+          mainFile?: string;
+          mode?: "auto" | "cli" | "web";
+        }
+  ): Promise<{
+    projectId: string;
+    mainFile: string;
+    mode: "cli" | "web";
+    success: boolean;
+    errorCount: number;
+    warningCount: number;
+    diagnostics: TypstDiagnostic[];
+  }> {
+    const opts = typeof options === "string" ? { mainFile: options } : options;
+    const mode = opts?.mode ?? "auto";
+    const requestedMainFile = opts?.mainFile;
+
+    if (mode === "web") {
+      return await this.getWebDiagnostics(projectId, requestedMainFile);
+    }
+
+    const typstAvailable = hasTypstBinary(this.typstBin);
+    if (!typstAvailable) {
+      if (mode === "cli") {
+        throw new TypstLoadError(
+          ["TYPST_BINARY_NOT_FOUND"],
+          `Typst compiler binary '${this.typstBin}' was not found. Please install the Typst compiler (e.g. 'winget install Typst.Typst' / 'brew install typst') or use mode: 'web' for zero-binary cloud diagnostics.`
+        );
+      }
+      return await this.getWebDiagnostics(projectId, requestedMainFile);
+    }
+
     try {
-      return compileWorkspaceDiagnostics({
-        typstBin: this.typstBin,
-        projectId,
-        workspaceDir,
-        mainFileName,
-      });
-    } finally {
-      rmSync(workspaceDir, { recursive: true, force: true });
+      const { workspaceDir, mainFileName } =
+        await this.materializeProjectWorkspace(projectId, requestedMainFile);
+      try {
+        const res = compileWorkspaceDiagnostics({
+          typstBin: this.typstBin,
+          projectId,
+          workspaceDir,
+          mainFileName,
+        });
+        return {
+          ...res,
+          mode: "cli",
+        };
+      } finally {
+        rmSync(workspaceDir, { recursive: true, force: true });
+      }
+    } catch (err) {
+      if (mode === "auto") {
+        return await this.getWebDiagnostics(projectId, requestedMainFile);
+      }
+      throw err;
     }
   }
 

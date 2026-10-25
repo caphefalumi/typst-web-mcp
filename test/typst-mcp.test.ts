@@ -21,6 +21,11 @@ import {
   replaceYjsText,
 } from "../src/protocol/yjs-doc.ts";
 import { TypstCloudClient } from "../src/client/typst-client.ts";
+import {
+  hasTypstBinary,
+  offsetToPosition,
+  resolvePythonBinary,
+} from "../src/client/compiler.ts";
 import { dispatchTypstTool, TYPST_MCP_TOOLS } from "../src/index.ts";
 
 describe("1. Binary WebSocket /editing/v3 Wire Codec", () => {
@@ -423,6 +428,28 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
                 proj.files.delete(id);
               }
               return Response.json({ data: { deleteFiles: vars.ids } });
+            }
+
+            if (q.includes("mutation EditProject")) {
+              const proj = projects.get(vars.projectId);
+              if (!proj)
+                return Response.json(
+                  { errors: [{ message: "Project not found" }] },
+                  { status: 404 }
+                );
+              if (vars.name) proj.name = vars.name;
+              if (vars.previewed !== undefined) proj.previewed = vars.previewed;
+              if (vars.pinnedVersion) proj.pinnedVersion = vars.pinnedVersion;
+              return Response.json({
+                data: {
+                  updateProject: {
+                    id: proj.id,
+                    name: proj.name,
+                    previewed: proj.previewed,
+                    pinnedVersion: proj.pinnedVersion,
+                  },
+                },
+              });
             }
 
             return Response.json(
@@ -929,5 +956,23 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
     expect(toSigninRes.headers.get("set-cookie")).toContain(
       "__Http-typst-session="
     );
+  });
+
+  test("offsetToPosition accurately maps byte offset to line and column", () => {
+    const text = "= Title\n\n#let x = 1\n#test(x)\n";
+    expect(offsetToPosition(text, 0)).toEqual({ line: 1, column: 1 });
+    expect(offsetToPosition(text, 8)).toEqual({ line: 2, column: 1 });
+    expect(offsetToPosition(text, 9)).toEqual({ line: 3, column: 1 });
+    expect(offsetToPosition(text, 14)).toEqual({ line: 3, column: 6 });
+  });
+
+  test("hasTypstBinary checks presence of typst binary", () => {
+    const available = hasTypstBinary();
+    expect(typeof available).toBe("boolean");
+  });
+
+  test("resolvePythonBinary resolves an available python executable", () => {
+    const py = resolvePythonBinary();
+    expect(typeof py).toBe("string");
   });
 });

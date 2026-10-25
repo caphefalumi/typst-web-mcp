@@ -17,6 +17,11 @@ export interface TypstDiagnostic {
   severity: "error" | "warning";
   message: string;
   hints: string[];
+  package?: string | null;
+  range?: {
+    start: number;
+    end: number;
+  };
 }
 
 export interface PreviewScreenshotItem {
@@ -54,6 +59,55 @@ export function resolveTypstBinary(explicitBin?: string): string {
     }
   }
   return "typst";
+}
+
+export function hasTypstBinary(explicitBin?: string): boolean {
+  try {
+    const bin = resolveTypstBinary(explicitBin);
+    if (bin !== "typst" && existsSync(bin)) {
+      return true;
+    }
+    const proc = spawnSync(bin, ["--version"], {
+      stdio: "ignore",
+      encoding: "utf8",
+    });
+    return proc.status === 0 && !proc.error;
+  } catch {
+    return false;
+  }
+}
+
+export function resolvePythonBinary(): string {
+  if (process.env.PYTHON_BIN) {
+    return process.env.PYTHON_BIN;
+  }
+  for (const cmd of ["python", "python3", "py"]) {
+    try {
+      const res = spawnSync(cmd, ["--version"], { stdio: "ignore" });
+      if (res.status === 0) {
+        return cmd;
+      }
+    } catch {}
+  }
+  return "python";
+}
+
+export function offsetToPosition(
+  text: string,
+  offset: number
+): { line: number; column: number } {
+  let line = 1;
+  let column = 1;
+  const target = Math.min(Math.max(0, offset), text.length);
+  for (let i = 0; i < target; i++) {
+    if (text[i] === "\n") {
+      line++;
+      column = 1;
+    } else {
+      column++;
+    }
+  }
+  return { line, column };
 }
 
 function hasValidPngSignature(bytes: Uint8Array): boolean {
@@ -158,6 +212,13 @@ export function compileWorkspaceDiagnostics(params: {
     }
   );
 
+  if (proc.error) {
+    throw new TypstLoadError(
+      ["TYPST_EXECUTION_FAILED"],
+      `Failed to execute Typst compiler binary '${params.typstBin}': ${proc.error.message}`
+    );
+  }
+
   const combinedOutput = `${proc.stderr ?? ""}\n${proc.stdout ?? ""}`;
   const diagnostics = parseShortDiagnostics(combinedOutput).map((d) => ({
     ...d,
@@ -219,6 +280,13 @@ export function compileWorkspacePdf(params: {
     }
   );
 
+  if (proc.error) {
+    throw new TypstLoadError(
+      ["TYPST_EXECUTION_FAILED"],
+      `Failed to execute Typst compiler binary '${params.typstBin}': ${proc.error.message}`
+    );
+  }
+
   const combinedOutput = `${proc.stderr ?? ""}\n${proc.stdout ?? ""}`;
   const diagnostics = parseShortDiagnostics(combinedOutput);
 
@@ -240,6 +308,211 @@ export function compileWorkspacePdf(params: {
     outputPath,
     sizeBytes: pdfBytes.byteLength,
     pdfHeader: pdfBytes.subarray(0, 8).toString("utf8"),
+    diagnostics,
+  };
+}
+
+export interface WebDiagnosticRaw {
+  severity: "error" | "warning";
+  package: string | null;
+  path: string;
+  range?: {
+    start: number;
+    end: number;
+  };
+  message: string;
+  hints: string[];
+  payload?: any;
+}
+
+export function captureWebDiagnostics(params: {
+  appUrl: string;
+  projectId: string;
+  cookieHeader: string;
+  mainFile?: string;
+  fileContents?: Record<string, string>;
+  timeoutMs?: number;
+}): {
+  projectId: string;
+  mainFile: string;
+  mode: "web";
+  success: boolean;
+  errorCount: number;
+  warningCount: number;
+  diagnostics: TypstDiagnostic[];
+} {
+  const pythonBin = resolvePythonBinary();
+  const timeoutSec = ((params.timeoutMs ?? 25000) / 1000).toFixed(1);
+
+  const pyScript = `
+import os, sys, json, time
+from playwright.sync_api import sync_playwright
+
+app_url = os.environ.get("TYPST_APP_URL", "https://typst.app")
+proj_id = os.environ["TYPST_PROJ_ID"]
+raw_cookie = os.environ.get("TYPST_COOKIE", "")
+timeout_sec = float(os.environ.get("TYPST_TIMEOUT_SEC", "25.0"))
+
+cookies = []
+for part in raw_cookie.split(";"):
+    part = part.strip()
+    if "=" in part:
+        k, v = part.split("=", 1)
+        name = k.strip()
+        val = v.strip()
+        is_session = "__Http" in name or "session" in name
+        cookies.append({
+            "name": name,
+            "value": val,
+            "domain": ".typst.app",
+            "path": "/",
+            "httpOnly": is_session,
+            "secure": True,
+            "sameSite": "Strict" if is_session else "Lax",
+        })
+
+with sync_playwright() as p:
+    browser = None
+    for channel in ["msedge", "chrome", None]:
+        try:
+            if channel:
+                browser = p.chromium.launch(channel=channel, headless=True)
+            else:
+                browser = p.chromium.launch(headless=True)
+            break
+        except Exception:
+            continue
+
+    if browser is None:
+        sys.stderr.write("NO_BROWSER_FOUND")
+        sys.exit(2)
+
+    ctx = browser.new_context(viewport={"width": 1920, "height": 1080})
+    if cookies:
+        ctx.add_cookies(cookies)
+
+    ctx.add_init_script("""
+        window.__typst_diagnostics = null;
+        window.__typst_status = 'starting';
+        const OrigWorker = window.Worker;
+        window.Worker = function(url, opts) {
+            const w = new OrigWorker(url, opts);
+            w.addEventListener('message', (ev) => {
+                try {
+                    if (ev.data && ev.data.tag === 'notification') {
+                        if (ev.data.name === 'diagnostics') {
+                            window.__typst_diagnostics = ev.data.notification?.diagnostics || [];
+                        } else if (ev.data.name === 'status') {
+                            window.__typst_status = ev.data.notification?.status || 'idle';
+                        }
+                    }
+                } catch(e) {}
+            });
+            return w;
+        };
+    """)
+
+    page = ctx.new_page()
+    page.goto(f"{app_url}/project/{proj_id}", wait_until="commit", timeout=45000)
+
+    start_time = time.time()
+    diags = None
+    while time.time() - start_time < timeout_sec:
+        data = page.evaluate("({ diag: window.__typst_diagnostics, status: window.__typst_status, url: window.location.href })")
+        if "signin" in data.get("url", ""):
+            browser.close()
+            sys.stderr.write(f"AUTH_REQUIRED: Redirected to {data.get('url')}")
+            sys.exit(3)
+        if data.get("diag") is not None:
+            diags = data.get("diag")
+            if data.get("status") == "idle":
+                break
+        page.wait_for_timeout(300)
+
+    browser.close()
+    print(json.dumps(diags or []))
+`;
+
+  const proc = spawnSync(pythonBin, ["-c", pyScript], {
+    env: {
+      ...process.env,
+      TYPST_APP_URL: params.appUrl,
+      TYPST_PROJ_ID: params.projectId,
+      TYPST_COOKIE: params.cookieHeader,
+      TYPST_TIMEOUT_SEC: timeoutSec,
+    },
+    encoding: "utf8",
+    timeout: (params.timeoutMs ?? 25000) + 15000,
+  });
+
+  if (proc.error || proc.status !== 0) {
+    const stderr = (proc.stderr || proc.error?.message || "").trim();
+    if (stderr.includes("NO_BROWSER_FOUND")) {
+      throw new TypstLoadError(
+        ["NO_BROWSER_FOUND"],
+        "No compatible browser (Edge, Chrome, or Chromium) found for Playwright web diagnostics."
+      );
+    }
+    if (stderr.includes("AUTH_REQUIRED")) {
+      throw new TypstLoadError(
+        ["UNAUTHENTICATED"],
+        `Typst Web cloud session expired or invalid: ${stderr}`
+      );
+    }
+    throw new TypstLoadError(
+      ["WEB_DIAGNOSTICS_FAILED"],
+      `Failed to capture Typst Web cloud diagnostics: ${stderr || "Ensure python with playwright is installed ('pip install playwright && playwright install')"}`
+    );
+  }
+
+  const rawJson = (proc.stdout || "").trim();
+  let rawList: any[] = [];
+  try {
+    rawList = JSON.parse(rawJson);
+  } catch (err: any) {
+    throw new TypstLoadError(
+      ["WEB_DIAGNOSTICS_PARSE_FAILED"],
+      `Failed to parse Typst Web diagnostics output: ${err.message}`
+    );
+  }
+
+  const mainFileName = params.mainFile ?? "main.typ";
+  const diagnostics: TypstDiagnostic[] = rawList.map((raw) => {
+    let line = 1;
+    let column = 1;
+    const filePath = raw.path || mainFileName;
+    const fileText = params.fileContents?.[filePath];
+    if (fileText && raw.range?.start !== undefined) {
+      const pos = offsetToPosition(fileText, raw.range.start);
+      line = pos.line;
+      column = pos.column;
+    }
+    return {
+      path: filePath,
+      line,
+      column,
+      severity: raw.severity === "error" ? "error" : "warning",
+      message: raw.message,
+      hints: Array.isArray(raw.hints) ? raw.hints : [],
+      package: raw.package ?? null,
+      range: raw.range
+        ? { start: raw.range.start, end: raw.range.end }
+        : undefined,
+    };
+  });
+
+  const errorCount = diagnostics.filter((d) => d.severity === "error").length;
+  const warningCount = diagnostics.filter(
+    (d) => d.severity === "warning"
+  ).length;
+
+  return {
+    projectId: params.projectId,
+    mainFile: mainFileName,
+    mode: "web",
+    success: errorCount === 0,
+    errorCount,
+    warningCount,
     diagnostics,
   };
 }
@@ -268,9 +541,10 @@ export function captureBrowserPreviewScreenshot(params: {
   );
   mkdirSync(outputDir, { recursive: true });
   const screenshotPath = join(outputDir, `typst-app-${params.projectId}.png`);
+  const pythonBin = resolvePythonBinary();
 
   const pyScript = `
-import os
+import os, sys
 from playwright.sync_api import sync_playwright
 
 app_url = os.environ["TYPST_PREVIEW_APP_URL"]
@@ -283,16 +557,35 @@ for part in raw_cookie.split(";"):
     part = part.strip()
     if "=" in part:
         k, v = part.split("=", 1)
+        name = k.strip()
+        val = v.strip()
+        is_session = "__Http" in name or "session" in name
         cookies.append({
-            "name": k.strip(),
-            "value": v.strip(),
-            "domain": "typst.app",
+            "name": name,
+            "value": val,
+            "domain": ".typst.app",
             "path": "/",
+            "httpOnly": is_session,
             "secure": True,
+            "sameSite": "Strict" if is_session else "Lax",
         })
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(channel="msedge", headless=True)
+    browser = None
+    for channel in ["msedge", "chrome", None]:
+        try:
+            if channel:
+                browser = p.chromium.launch(channel=channel, headless=True)
+            else:
+                browser = p.chromium.launch(headless=True)
+            break
+        except Exception:
+            continue
+
+    if browser is None:
+        sys.stderr.write("NO_BROWSER_FOUND")
+        sys.exit(2)
+
     ctx = browser.new_context(viewport={"width": 1920, "height": 1080}, device_scale_factor=2)
     if cookies:
         ctx.add_cookies(cookies)
@@ -302,7 +595,7 @@ with sync_playwright() as p:
     page.screenshot(path=out_path, full_page=False)
     browser.close()
 `;
-  const proc = spawnSync("python", ["-c", pyScript], {
+  const proc = spawnSync(pythonBin, ["-c", pyScript], {
     env: {
       ...process.env,
       TYPST_PREVIEW_APP_URL: params.appUrl,
