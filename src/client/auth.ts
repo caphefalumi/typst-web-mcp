@@ -48,11 +48,38 @@ function extractRawSetCookies(headers: Headers): string[] {
   return [];
 }
 
+export function getDefaultSessionFilePath(): string {
+  if (process.env.TYPST_SESSION_FILE) {
+    return process.env.TYPST_SESSION_FILE;
+  }
+
+  const platform = process.platform;
+  if (platform === "win32") {
+    const localAppData =
+      process.env.LOCALAPPDATA ||
+      (process.env.APPDATA
+        ? join(process.env.APPDATA, "..", "Local")
+        : join(homedir(), "AppData", "Local"));
+    return join(localAppData, "typst-mcp", "session.json");
+  }
+
+  if (platform === "darwin") {
+    if (process.env.XDG_CACHE_HOME) {
+      return join(process.env.XDG_CACHE_HOME, "typst-mcp", "session.json");
+    }
+    return join(homedir(), "Library", "Caches", "typst-mcp", "session.json");
+  }
+
+  // Linux and other POSIX systems (XDG Base Directory specification)
+  const cacheDir = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
+  return join(cacheDir, "typst-mcp", "session.json");
+}
+
 function resolveSessionFilePath(
   configuredPath: string | null | undefined
 ): string | null {
   if (configuredPath === undefined) {
-    return join(homedir(), ".pi", "agent", "typst-mcp-session.json");
+    return getDefaultSessionFilePath();
   }
   return configuredPath;
 }
@@ -142,12 +169,22 @@ export class TypstAuthManager {
   }
 
   private loadStoredSession(): void {
-    if (!this.sessionFilePath || !existsSync(this.sessionFilePath)) {
+    if (!this.sessionFilePath) {
       return;
+    }
+    let targetPath = this.sessionFilePath;
+    if (!existsSync(targetPath)) {
+      // Legacy fallback check for seamless migration from ~/.pi/agent/typst-mcp-session.json
+      const legacyPath = join(homedir(), ".pi", "agent", "typst-mcp-session.json");
+      if (existsSync(legacyPath)) {
+        targetPath = legacyPath;
+      } else {
+        return;
+      }
     }
     try {
       const raw = JSON.parse(
-        readFileSync(this.sessionFilePath, "utf8")
+        readFileSync(targetPath, "utf8")
       ) as StoredSession;
       if (raw && typeof raw.cookies === "object" && raw.cookies) {
         this.cookies = { ...raw.cookies };

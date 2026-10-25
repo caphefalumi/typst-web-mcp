@@ -13,41 +13,18 @@
 
 ---
 
-## Quick Start
+## Installation
+
+Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, `claude_desktop_config.json`, or `.cursor/mcp.json`).
 
 ### Prerequisites
 
-- [**Node.js**](https://nodejs.org/) `>= 18` (for `npx` install) or [**Bun**](https://bun.sh) `>= 1.2` (for local development)
+- [**Node.js**](https://nodejs.org/) `>= 18`
 - [**Typst CLI**](https://github.com/typst/typst) (optional: `typst` on `PATH` for local CLI compilation speed; if not installed, `typst_get_diagnostics` automatically uses Typst Web cloud compiler diagnostics)
 
-### Installation
+### Option 1: Normal (Standard)
 
-**Option 1: Quick start (no clone, no global install):**
-
-```bash
-npx -y typst-mcp
-```
-
-**Option 2: Always run latest release (bypasses local `npx` cache):**
-
-```bash
-npx -y typst-mcp@latest
-```
-
-Runs the published [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) package (Node `>= 18`). `-y` skips the npx confirmation prompt.
-
-**Option 3: From source (development):**
-
-```bash
-git clone https://github.com/caphefalumi/typst-web-mcp.git
-cd typst-web-mcp
-bun install
-bun run dev
-```
-
-### MCP Client Configuration
-
-Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, `claude_desktop_config.json`, or `.cursor/mcp.json`):
+Runs the published [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) package (`npx -y typst-mcp`):
 
 ```json
 {
@@ -64,9 +41,24 @@ Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, 
 }
 ```
 
-> **Tip:** You can also set `"args": ["-y", "typst-mcp@latest"]` to guarantee your MCP client automatically pulls and runs the newest version on launch.
+### Option 2: Always Latest
 
-> **Session Persistence:** Once authenticated via `typst_auth_login` (or environment variables), the `__Http-typst-session` cookie is cached locally at `~/.pi/agent/typst-mcp-session.json` so subsequent tool calls authenticate automatically without re-signing in.
+Bypasses local `npx` cache to automatically pull and run the newest release on launch (`npx -y typst-mcp@latest`):
+
+```json
+{
+  "mcpServers": {
+    "typst-mcp": {
+      "command": "npx",
+      "args": ["-y", "typst-mcp@latest"],
+      "env": {
+        "TYPST_EMAIL": "your-email@example.com",
+        "TYPST_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
 
 ---
 
@@ -108,6 +100,19 @@ Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, 
 ---
 
 ## Development & Verification
+
+### From Source (Development)
+
+Requires [**Bun**](https://bun.sh) `>= 1.2`:
+
+```bash
+git clone https://github.com/caphefalumi/typst-web-mcp.git
+cd typst-web-mcp
+bun install
+bun run dev
+```
+
+### Build & Test
 
 ```bash
 # Compile publishable output to dist/

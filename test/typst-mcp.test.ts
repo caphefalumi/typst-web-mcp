@@ -21,6 +21,7 @@ import {
   replaceYjsText,
 } from "../src/protocol/yjs-doc.ts";
 import { TypstCloudClient } from "../src/client/typst-client.ts";
+import { getDefaultSessionFilePath } from "../src/client/auth.ts";
 import {
   hasTypstBinary,
   offsetToPosition,
@@ -974,5 +975,24 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
   test("resolvePythonBinary resolves an available python executable", () => {
     const py = resolvePythonBinary();
     expect(typeof py).toBe("string");
+  });
+
+  test("getDefaultSessionFilePath resolves standard cache location and respects TYPST_SESSION_FILE", () => {
+    const defaultPath = getDefaultSessionFilePath();
+    expect(defaultPath).toContain("typst-mcp");
+    expect(defaultPath).toContain("session.json");
+    expect(defaultPath).not.toContain(".pi");
+
+    const originalEnv = process.env.TYPST_SESSION_FILE;
+    try {
+      process.env.TYPST_SESSION_FILE = "/custom/path/typst-session.json";
+      expect(getDefaultSessionFilePath()).toBe("/custom/path/typst-session.json");
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.TYPST_SESSION_FILE = originalEnv;
+      } else {
+        delete process.env.TYPST_SESSION_FILE;
+      }
+    }
   });
 });

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2026-10-25
+
+### Changed
+- **Cross-Platform Session Cache**: Switched session persistence from legacy `~/.pi/agent/typst-mcp-session.json` to industry-standard XDG / OS cache directories (`~/.cache/typst-mcp/session.json` on Linux, `~/Library/Caches/typst-mcp/session.json` on macOS, `%LOCALAPPDATA%\typst-mcp\session.json` on Windows) with `TYPST_SESSION_FILE` environment override and legacy fallback migration.
+- **Documentation**: Restructured README installation into MCP client configuration with normal and `@latest` options, moving source development to the development section.
+
+## [1.2.0] - 2026-10-25
+
+### Added
+- **Typst Web Cloud Diagnostics Fallback**: Zero-binary diagnostics fallback using live Typst Web compiler when local `typst` CLI binary is not present on `PATH`.
+
 ## [1.1.0] - 2026-10-25
 
 ### Added
