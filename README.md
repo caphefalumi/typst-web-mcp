@@ -82,21 +82,6 @@ Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, 
 
 ---
 
-## Architecture
-
-```mermaid
-flowchart LR
-    Agent["AI Agent\n(Pi / Claude / Cursor)"] <-->|"JSON-RPC (stdio)"| MCP["typst-mcp\n(Node / TypeScript)"]
-    MCP <-->|"GraphQL (/v1/graphql)\n+ X-Typst-Preflight"| API["https://api.typst.app"]
-    MCP <-->|"REST Yjs & Blobs\n(/v1/files/:pid/:fid/yjs)"| API
-    MCP <-->|"Binary lib0 WebSocket\n(wss://api.typst.app/editing/v3)"| WS["typst.app Real-Time Sync"]
-    MCP -->|"Workspace Sync + Compile"| TypstCLI["Typst Compiler\n(Diagnostics & PDF)"]
-```
-
-See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered protocol specification.
-
----
-
 ## MCP Tools (18 Tools)
 
 | Category | Tool Name | Description |
@@ -150,36 +135,6 @@ Same flow as [Canvas-CLI](https://github.com/caphefalumi/Canvas-CLI):
 [`.github/workflows/npm-publish.yml`](./.github/workflows/npm-publish.yml) runs the same checks as CI (`bun test`, including smoke) in a `test` job; the `publish` job runs only if that passes, on the `npm-publish` environment: `bun ci`, `bun run build`, then `npm publish --access public` via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC). The publish step clears `NODE_AUTH_TOKEN` so the CLI uses GitHub OIDC instead of a stale token from `setup-node`.
 
 **Trusted publisher (maintainers):** package [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) → Settings → Trusted publishing → GitHub Actions — user/org `caphefalumi`, repo `typst-web-mcp`, workflow file `npm-publish.yml`, environment `npm-publish`, allow **npm publish**.
-
-### Project Structure
-
-```text
-typst-web-mcp/
-├── docs/
-│   └── PROTOCOL.md              # Reverse-engineered typst.app REST, GraphQL, Yjs & WS v3 spec
-├── src/
-│   ├── protocol/
-│   │   ├── edit-diff.ts         # Fuzzy matching, CRLF/BOM resilience, unified diff & patch generator
-│   │   ├── ws-codec.ts          # Binary lib0 /editing/v3 WebSocket encoder & decoder
-│   │   ├── yjs-doc.ts           # Yjs CRDT text decoding, replacement & surgical patching
-│   │   └── graphql.ts           # GraphQL queries, mutations, fragments & types
-│   ├── client/
-│   │   ├── auth.ts              # Direct /v1/auth/signin login, cookie jar & Playwright fallback
-│   │   ├── compiler.ts          # Typst binary resolver, diagnostic parser, PDF & PNG preview compiler
-│   │   ├── errors.ts            # Structured TypstLoadError & error formatting helpers
-│   │   └── typst-client.ts      # TypstCloudClient (REST, GraphQL, WebSocket v3, Compiler facade)
-│   ├── tools/
-│   │   └── definitions.ts       # MCP JSON Schema definitions for all 16 tools
-│   ├── utils/
-│   │   ├── file-mutation-queue.ts # Serialized mutation mutex queue per file
-│   │   ├── mime.ts              # Image MIME type detection
-│   │   └── truncate.ts          # Dual-limit (line & byte) head/tail truncation utilities
-│   └── index.ts                 # MCP stdio server entrypoint (dev); npm bin runs dist/index.js
-├── test/
-│   └── typst-mcp.test.ts        # 7 test suites (57 assertions) covering codecs, CRDTs & E2E
-├── LICENSE                      # MIT License
-└── package.json
-```
 
 ---
 
