@@ -103,6 +103,8 @@ See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered
 | **Files & CRDT** | `typst_read_file` | Read any project file with offset/limit pagination, optional line numbering, truncation limits (2,000 lines/50KB), and multimodal MCP image content blocks (`PNG`, `JPG`, `SVG`, `WebP`). |
 | **Files & CRDT** | `typst_write_file` | Create or overwrite a `.typ`/`.bib`/`.toml` file, protected by per-file mutation queue serialization, syncing Yjs state diffs over `/editing/v3` WebSocket and REST. |
 | **Files & CRDT** | `typst_edit_file` | Apply surgical `oldText -> newText` replacements directly to the `Y.Text("text")` CRDT with CRLF/BOM resilience, fuzzy quote/dash matching, unified diff & patch output, and per-file mutation serialization. |
+| **Search & Replace** | `typst_grep_project` | Search for text or regular expressions across project files, returning file paths, line numbers, and optional surrounding context lines. |
+| **Search & Replace** | `typst_find_and_replace` | Find and replace text or regex across a single file or project-wide with regex capture groups (`$1`), dry-run preview diffs, and per-file mutation serialization. |
 | **Assets & Tree** | `typst_upload_asset` | Upload or replace binary assets (`PNG`, `JPG`, `SVG`, `PDF`, fonts) from a local path or base64 payload. |
 | **Assets & Tree** | `typst_rename_file` | Rename or move a file inside a `typst.app` project (`UpdatesFileMutation`). |
 | **Assets & Tree** | `typst_delete_file` | Delete a file or binary asset from a project (`DeleteFilesMutation`). |

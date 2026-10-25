@@ -406,4 +406,109 @@ export const TYPST_MCP_TOOLS: Tool[] = [
       required: ["projectId"],
     },
   },
+  {
+    name: "typst_grep_project",
+    description:
+      "Search for text or regular expressions across files in a https://typst.app project. Returns matching lines with file paths, line numbers, and optional surrounding context lines.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: {
+          type: "string",
+          description: "The Typst project ID",
+        },
+        pattern: {
+          type: "string",
+          description: "Search pattern (regular expression or literal string)",
+        },
+        path: {
+          type: "string",
+          description:
+            "Optional directory or file path to restrict search (e.g. 'chapters/' or 'main.typ')",
+        },
+        glob: {
+          type: "string",
+          description:
+            "Optional glob pattern to filter files (e.g. '*.typ' or '*.bib')",
+        },
+        ignoreCase: {
+          type: "boolean",
+          description: "Case-insensitive search (default: false)",
+        },
+        literal: {
+          type: "boolean",
+          description:
+            "Treat pattern as literal string instead of regex (default: false)",
+        },
+        context: {
+          type: "number",
+          description:
+            "Number of lines to show before and after each match (default: 0)",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of matches to return (default: 100)",
+        },
+      },
+      required: ["projectId", "pattern"],
+    },
+  },
+  {
+    name: "typst_find_and_replace",
+    description:
+      "Find and replace text or regular expressions across a single file or all files in a https://typst.app project. Supports dry-run preview diffs, regex capture groups, and per-file mutation queue serialization.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: {
+          type: "string",
+          description: "The Typst project ID",
+        },
+        pattern: {
+          type: "string",
+          description: "Search pattern to replace (literal substring or regex)",
+        },
+        replacement: {
+          type: "string",
+          description:
+            "Replacement text (supports $1, $2 capture groups if regex is true)",
+        },
+        filePath: {
+          type: "string",
+          description:
+            "Optional file path/name (e.g. 'main.typ'). If omitted, searches and replaces across all text files in the project.",
+        },
+        glob: {
+          type: "string",
+          description:
+            "Optional glob pattern to filter target files when searching project-wide (e.g. '*.typ')",
+        },
+        regex: {
+          type: "boolean",
+          description:
+            "Whether pattern is a regular expression (default: false)",
+        },
+        ignoreCase: {
+          type: "boolean",
+          description: "Case-insensitive search (default: false)",
+        },
+        limit: {
+          type: "number",
+          description:
+            "Maximum number of replacements per file (default: replace all occurrences)",
+        },
+        dryRun: {
+          type: "boolean",
+          description:
+            "If true, returns unified diffs and match counts without saving changes (default: false)",
+        },
+        preferWebSocket: {
+          type: "boolean",
+          description:
+            "Push real-time TextUpdate over /editing/v3 WebSocket before REST persistence (default: true)",
+        },
+      },
+      required: ["projectId", "pattern", "replacement"],
+    },
+  },
 ];

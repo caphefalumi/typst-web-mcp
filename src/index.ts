@@ -205,6 +205,30 @@ export async function dispatchTypstTool(
         includeBase64: Boolean(args.includeBase64),
       });
 
+    case "typst_grep_project":
+      return await client.grepProject(String(args.projectId), {
+        pattern: String(args.pattern),
+        path: args.path as string | undefined,
+        glob: args.glob as string | undefined,
+        literal: Boolean(args.literal),
+        ignoreCase: Boolean(args.ignoreCase),
+        context: resolveOptionalNumber(args.context),
+        limit: resolveOptionalNumber(args.limit),
+      });
+
+    case "typst_find_and_replace":
+      return await client.findAndReplace(String(args.projectId), {
+        pattern: String(args.pattern),
+        replacement: String(args.replacement),
+        filePath: args.filePath as string | undefined,
+        glob: args.glob as string | undefined,
+        regex: Boolean(args.regex),
+        ignoreCase: Boolean(args.ignoreCase),
+        limit: resolveOptionalNumber(args.limit),
+        dryRun: Boolean(args.dryRun),
+        preferWebSocket: resolvePreferWebSocket(args.preferWebSocket),
+      });
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

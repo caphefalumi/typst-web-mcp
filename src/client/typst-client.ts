@@ -42,8 +42,55 @@ import {
 } from "../utils/truncate.js";
 import { detectSupportedImageMimeType } from "../utils/mime.js";
 import { withFileMutationQueue } from "../utils/file-mutation-queue.js";
+import {
+  matchGlob,
+  searchInContent,
+  replaceInContent,
+  type GrepMatch,
+} from "../protocol/search-replace.js";
 
 export { TypstLoadError, resolveTypstBinary, type TypstDiagnostic };
+
+export interface GrepProjectOptions {
+  pattern: string;
+  path?: string;
+  glob?: string;
+  literal?: boolean;
+  ignoreCase?: boolean;
+  context?: number;
+  limit?: number;
+}
+
+export interface GrepProjectResult {
+  matches: GrepMatch[];
+  totalMatches: number;
+  filesSearched: number;
+  truncated: boolean;
+}
+
+export interface FindAndReplaceOptions {
+  pattern: string;
+  replacement: string;
+  filePath?: string;
+  glob?: string;
+  regex?: boolean;
+  ignoreCase?: boolean;
+  limit?: number;
+  dryRun?: boolean;
+  preferWebSocket?: boolean;
+}
+
+export interface FindAndReplaceResult {
+  filesModified: Array<{
+    file: string;
+    replacementsCount: number;
+    diff: string;
+    patch: string;
+    firstChangedLine?: number;
+  }>;
+  totalReplacements: number;
+  dryRun: boolean;
+}
 
 export interface ReadFileOptions {
   offset?: number;
@@ -1051,5 +1098,125 @@ export class TypstCloudClient {
     } finally {
       rmSync(workspaceDir, { recursive: true, force: true });
     }
+  }
+
+  async grepProject(
+    projectId: string,
+    options: GrepProjectOptions
+  ): Promise<GrepProjectResult> {
+    const files = await this.listFiles(projectId);
+    const limit = options.limit ?? 100;
+    const allMatches: GrepMatch[] = [];
+    let totalMatches = 0;
+    let filesSearched = 0;
+
+    for (const file of files) {
+      if (!file.isMultiplayable) continue;
+
+      if (options.path) {
+        const normalizedPath = options.path.replace(/^\/+/, "");
+        if (
+          file.name !== normalizedPath &&
+          !file.name.startsWith(`${normalizedPath}/`) &&
+          file.id !== options.path
+        ) {
+          continue;
+        }
+      }
+
+      if (options.glob && !matchGlob(file.name, options.glob)) {
+        continue;
+      }
+
+      filesSearched++;
+      const yjsBytes = await this.downloadFileYjs(projectId, file.id);
+      const text = decodeYjsText(yjsBytes);
+
+      const remainingLimit = Math.max(0, limit - allMatches.length);
+      const result = searchInContent(file.name, text, {
+        pattern: options.pattern,
+        literal: options.literal,
+        ignoreCase: options.ignoreCase,
+        context: options.context,
+        limit: remainingLimit,
+      });
+
+      totalMatches += result.totalMatches;
+      allMatches.push(...result.matches);
+    }
+
+    return {
+      matches: allMatches,
+      totalMatches,
+      filesSearched,
+      truncated: totalMatches > allMatches.length,
+    };
+  }
+
+  async findAndReplace(
+    projectId: string,
+    options: FindAndReplaceOptions
+  ): Promise<FindAndReplaceResult> {
+    const files = await this.listFiles(projectId);
+    const filesModified: FindAndReplaceResult["filesModified"] = [];
+    let totalReplacements = 0;
+
+    for (const file of files) {
+      if (!file.isMultiplayable) continue;
+
+      if (options.filePath) {
+        const normalizedPath = options.filePath.replace(/^\/+/, "");
+        if (file.name !== normalizedPath && file.id !== options.filePath) {
+          continue;
+        }
+      }
+
+      if (options.glob && !matchGlob(file.name, options.glob)) {
+        continue;
+      }
+
+      await withFileMutationQueue(`${projectId}:${file.id}`, async () => {
+        const remote = await this.downloadFileYjs(projectId, file.id);
+        const text = decodeYjsText(remote);
+
+        const repResult = replaceInContent(file.name, text, {
+          pattern: options.pattern,
+          replacement: options.replacement,
+          regex: options.regex,
+          ignoreCase: options.ignoreCase,
+          limit: options.limit,
+        });
+
+        if (repResult.replacementCount > 0) {
+          if (!options.dryRun) {
+            const { encodedUpdate } = replaceYjsText(
+              remote,
+              repResult.updatedText
+            );
+            await this.saveYjsUpdate(
+              projectId,
+              file.id,
+              encodedUpdate,
+              options.preferWebSocket ?? true
+            );
+          }
+
+          filesModified.push({
+            file: file.name,
+            replacementsCount: repResult.replacementCount,
+            diff: repResult.diff,
+            patch: repResult.patch,
+            firstChangedLine: repResult.firstChangedLine,
+          });
+          totalReplacements += repResult.replacementCount;
+        }
+      });
+    }
+
+    return {
+      filesModified,
+      totalReplacements,
+      dryRun: Boolean(options.dryRun),
+    };
   }
 }

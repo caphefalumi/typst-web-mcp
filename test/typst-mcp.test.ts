@@ -617,7 +617,7 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("exposes all 16 required MCP tools", () => {
+  test("exposes all 18 required MCP tools", () => {
     const names = TYPST_MCP_TOOLS.map((t) => t.name);
     expect(names).toEqual([
       "typst_auth_login",
@@ -636,6 +636,8 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
       "typst_get_diagnostics",
       "typst_export_pdf",
       "typst_capture_screenshot",
+      "typst_grep_project",
+      "typst_find_and_replace",
     ]);
   });
 
@@ -909,7 +911,7 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
     expect(initReply?.result?.serverInfo?.name).toBe("typst-mcp");
 
     const toolsReply = lines.find((m) => m.id === 2);
-    expect(toolsReply?.result?.tools?.length).toBe(16);
+    expect(toolsReply?.result?.tools?.length).toBe(18);
     proc.kill();
   });
 
