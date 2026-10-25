@@ -35,8 +35,34 @@ import {
   encodeMessage,
   MessageKind,
 } from "../protocol/ws-codec.js";
+import {
+  truncateHead,
+  formatSize,
+  type TruncationResult,
+} from "../utils/truncate.js";
+import { detectSupportedImageMimeType } from "../utils/mime.js";
 
 export { TypstLoadError, resolveTypstBinary, type TypstDiagnostic };
+
+export interface ReadFileOptions {
+  offset?: number;
+  limit?: number;
+  lineNumbers?: boolean;
+  maxLines?: number;
+  maxBytes?: number;
+}
+
+export interface TypstReadFileResult {
+  file: TypstFileMeta;
+  content: string;
+  encoding: "utf-8" | "base64";
+  mimeType?: string;
+  isImage?: boolean;
+  truncation?: TruncationResult;
+  totalLines?: number;
+  startLine?: number;
+  endLine?: number;
+}
 
 const URL_ALPHABET =
   "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
@@ -416,27 +442,125 @@ export class TypstCloudClient {
 
   async readFile(
     projectId: string,
-    fileIdOrPath: string
-  ): Promise<{
-    file: TypstFileMeta;
-    content: string;
-    encoding: "utf-8" | "base64";
-  }> {
+    fileIdOrPath: string,
+    options?: ReadFileOptions
+  ): Promise<TypstReadFileResult> {
     const file = await this.resolveFile(projectId, fileIdOrPath);
     if (file.isMultiplayable) {
       const yjsBytes = await this.downloadFileYjs(projectId, file.id);
       const text = decodeYjsText(yjsBytes);
+      const allLines = text.split("\n");
+      const totalLines = allLines.length;
+
+      if (options?.offset !== undefined && options.offset > totalLines) {
+        throw new Error(
+          `Offset ${options.offset} is beyond end of file (${totalLines} lines total)`
+        );
+      }
+
+      const startLine = options?.offset ? Math.max(0, options.offset - 1) : 0;
+      const startLineDisplay = startLine + 1;
+      let selectedContent: string;
+      let userLimitedLines: number | undefined;
+
+      if (options?.limit !== undefined) {
+        const endLine = Math.min(startLine + options.limit, totalLines);
+        selectedContent = allLines.slice(startLine, endLine).join("\n");
+        userLimitedLines = endLine - startLine;
+      } else {
+        selectedContent = allLines.slice(startLine).join("\n");
+      }
+
+      const truncation = truncateHead(selectedContent, {
+        maxLines: options?.maxLines,
+        maxBytes: options?.maxBytes,
+      });
+
+      let outputText: string;
+      let endLineDisplay = startLineDisplay;
+
+      if (truncation.firstLineExceedsLimit) {
+        const firstLineSize = formatSize(
+          Buffer.byteLength(allLines[startLine] ?? "", "utf-8")
+        );
+        outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(
+          truncation.maxBytes
+        )} limit]`;
+      } else if (truncation.truncated) {
+        endLineDisplay = startLineDisplay + truncation.outputLines - 1;
+        const nextOffset = endLineDisplay + 1;
+        let body = truncation.content;
+        if (options?.lineNumbers) {
+          const lines = body.split("\n");
+          const width = String(endLineDisplay).length;
+          body = lines
+            .map(
+              (line, idx) =>
+                `${String(startLineDisplay + idx).padStart(width, " ")} | ${line}`
+            )
+            .join("\n");
+        }
+        if (truncation.truncatedBy === "lines") {
+          outputText = `${body}\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalLines}. Use offset=${nextOffset} to continue.]`;
+        } else {
+          outputText = `${body}\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalLines} (${formatSize(
+            truncation.maxBytes
+          )} limit). Use offset=${nextOffset} to continue.]`;
+        }
+      } else if (
+        userLimitedLines !== undefined &&
+        startLine + userLimitedLines < totalLines
+      ) {
+        endLineDisplay = startLine + userLimitedLines;
+        const remaining = totalLines - endLineDisplay;
+        const nextOffset = endLineDisplay + 1;
+        let body = truncation.content;
+        if (options?.lineNumbers) {
+          const lines = body.split("\n");
+          const width = String(endLineDisplay).length;
+          body = lines
+            .map(
+              (line, idx) =>
+                `${String(startLineDisplay + idx).padStart(width, " ")} | ${line}`
+            )
+            .join("\n");
+        }
+        outputText = `${body}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
+      } else {
+        endLineDisplay = totalLines;
+        let body = truncation.content;
+        if (options?.lineNumbers) {
+          const lines = body.split("\n");
+          const width = String(startLineDisplay + lines.length - 1).length;
+          body = lines
+            .map(
+              (line, idx) =>
+                `${String(startLineDisplay + idx).padStart(width, " ")} | ${line}`
+            )
+            .join("\n");
+        }
+        outputText = body;
+      }
+
       return {
         file,
-        content: text,
+        content: outputText,
         encoding: "utf-8",
+        totalLines,
+        startLine: startLineDisplay,
+        endLine: endLineDisplay,
+        truncation: truncation.truncated ? truncation : undefined,
       };
     }
     const blob = await this.downloadFileBlob(projectId, file.id);
+    const mimeType = detectSupportedImageMimeType(file.name);
+    const isImage = Boolean(mimeType && mimeType.startsWith("image/"));
     return {
       file,
       content: Buffer.from(blob).toString("base64"),
       encoding: "base64",
+      mimeType,
+      isImage,
     };
   }
 

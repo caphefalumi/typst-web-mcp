@@ -74,7 +74,15 @@ export async function dispatchTypstTool(
     case "typst_read_file":
       return await client.readFile(
         String(args.projectId),
-        String(args.filePath)
+        String(args.filePath),
+        {
+          offset: resolveOptionalNumber(args.offset),
+          limit: resolveOptionalNumber(args.limit),
+          lineNumbers:
+            typeof args.lineNumbers === "boolean"
+              ? args.lineNumbers
+              : undefined,
+        }
       );
 
     case "typst_write_file":
@@ -185,6 +193,43 @@ export function createTypstMcpServer(options: TypstClientOptions = {}): {
         name,
         (args as Record<string, unknown>) ?? {}
       );
+      if (
+        name === "typst_read_file" &&
+        typeof result === "object" &&
+        result !== null &&
+        Boolean((result as Record<string, unknown>).isImage) &&
+        typeof (result as Record<string, unknown>).mimeType === "string" &&
+        typeof (result as Record<string, unknown>).content === "string"
+      ) {
+        const img = result as {
+          file?: unknown;
+          encoding?: string;
+          mimeType: string;
+          content: string;
+        };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  file: img.file,
+                  encoding: img.encoding,
+                  mimeType: img.mimeType,
+                  isImage: true,
+                },
+                null,
+                2
+              ),
+            },
+            {
+              type: "image" as const,
+              data: img.content,
+              mimeType: img.mimeType,
+            },
+          ],
+        };
+      }
       return {
         content: [
           {

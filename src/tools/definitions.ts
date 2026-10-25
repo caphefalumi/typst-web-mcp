@@ -134,7 +134,7 @@ export const TYPST_MCP_TOOLS: Tool[] = [
   {
     name: "typst_read_file",
     description:
-      "Read a file from a https://typst.app project. Decodes Yjs CRDT state (doc.getText('text')) into UTF-8 text for multiplayer files (.typ, .bib, .toml, etc.) or returns base64 for binary assets.",
+      "Read a file from a https://typst.app project. Supports text files (.typ, .bib, .toml, etc.) with offset/limit pagination, optional line numbering, and automatic truncation safeguards (2,000 lines or 50KB). Binary image assets (PNG, JPEG, SVG, WebP, GIF, BMP) are returned with native multimodal MCP image content blocks.",
     inputSchema: {
       type: "object",
       properties: {
@@ -145,6 +145,19 @@ export const TYPST_MCP_TOOLS: Tool[] = [
         filePath: {
           type: "string",
           description: "File path/name (e.g. 'main.typ') or file ID",
+        },
+        offset: {
+          type: "number",
+          description: "Line number to start reading from (1-indexed)",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of lines to read",
+        },
+        lineNumbers: {
+          type: "boolean",
+          description:
+            "Whether to prefix each line with its 1-indexed line number (e.g. '1 | ')",
         },
       },
       required: ["projectId", "filePath"],
