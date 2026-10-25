@@ -1,12 +1,16 @@
 name: Publish
 
 on:
+  push:
+    tags:
+      - 'v*'
   release:
     types: [created]
   workflow_dispatch:
+
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -50,3 +54,78 @@ jobs:
       - run: bun run build
       - name: Publish to npm (OIDC)
         run: env -u NODE_AUTH_TOKEN npm publish --access public
+
+  release-and-changelog:
+    needs: [test, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Determine Tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "val=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "val=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "val=" >> $GITHUB_OUTPUT
+          fi
+      - name: Create GitHub Release (if triggered by tag push)
+        if: steps.tag.outputs.val != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.val }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+      - name: Auto-update CHANGELOG.md and push to main as github-actions[bot]
+        if: steps.tag.outputs.val != ''
+        env:
+          TAG: ${{ steps.tag.outputs.val }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const { execSync } = require("child_process");
+
+            const tag = process.env.TAG;
+            if (!tag) process.exit(0);
+            const version = tag.replace(/^v/, "");
+            const date = new Date().toISOString().slice(0, 10);
+
+            let prevTag = "";
+            try {
+              prevTag = execSync(`git describe --tags --abbrev=0 "${tag}^"`).toString().trim();
+            } catch {}
+
+            const range = prevTag ? `${prevTag}..${tag}` : tag;
+            const commits = execSync(`git log "${range}" --pretty=format:"- %s (%h)" --no-merges`).toString().trim();
+
+            let changelog = fs.existsSync("CHANGELOG.md") ? fs.readFileSync("CHANGELOG.md", "utf8") : "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n";
+            if (!changelog.includes(`## [${version}]`)) {
+              const newEntry = `## [${version}] - ${date}\n\n${commits}\n\n`;
+              const firstHeader = changelog.indexOf("## [");
+              if (firstHeader !== -1) {
+                changelog = changelog.slice(0, firstHeader) + newEntry + changelog.slice(firstHeader);
+              } else {
+                changelog += "\n" + newEntry;
+              }
+              fs.writeFileSync("CHANGELOG.md", changelog);
+              console.log(`Updated CHANGELOG.md for ${version}`);
+            } else {
+              console.log(`CHANGELOG.md already contains version ${version}`);
+            }
+          '
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet CHANGELOG.md; then
+            git add CHANGELOG.md
+            git commit -m "chore(release): update changelog for ${{ steps.tag.outputs.val }} [skip ci]"
+            git push origin main
+          fi

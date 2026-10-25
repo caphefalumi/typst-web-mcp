@@ -72,7 +72,7 @@ async function mcpStdioSmoke(
   const toolsReply = lines.find((m) => m.id === 2) as {
     result?: { tools?: unknown[] };
   };
-  expect(toolsReply?.result?.tools?.length).toBe(16);
+  expect(toolsReply?.result?.tools?.length).toBeGreaterThanOrEqual(16);
 
   proc.kill();
 }

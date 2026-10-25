@@ -89,7 +89,7 @@ See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered
 
 ---
 
-## MCP Tools (16 Tools)
+## MCP Tools (18 Tools)
 
 | Category | Tool Name | Description |
 |:---|:---|:---|
