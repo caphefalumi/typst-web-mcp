@@ -17,7 +17,7 @@ function createMockClientWithFiles(
 
   return new TypstCloudClient({
     apiUrl: "https://mock.typst.test",
-    fetchImpl: async (url, init) => {
+    fetchImpl: (async (url: any, init: any) => {
       const urlStr = url.toString();
 
       // GraphQL project files
@@ -55,7 +55,7 @@ function createMockClientWithFiles(
             typeof f.content === "string"
               ? createInitialYjsUpdate(f.content)
               : f.content;
-          return new Response(bytes, {
+          return new Response(bytes as unknown as BodyInit, {
             headers: { "Content-Type": "application/octet-stream" },
           });
         }
@@ -70,14 +70,14 @@ function createMockClientWithFiles(
             typeof f.content === "string"
               ? new TextEncoder().encode(f.content)
               : f.content;
-          return new Response(bytes, {
+          return new Response(bytes as unknown as BodyInit, {
             headers: { "Content-Type": "application/octet-stream" },
           });
         }
       }
 
       return new Response("Not found", { status: 404 });
-    },
+    }) as typeof fetch,
   });
 }
 
@@ -168,7 +168,7 @@ describe("Phase 2 Read Tool: Pagination, Line Numbers & Images", () => {
     const rawPngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
     const { server } = createTypstMcpServer({
       apiUrl: "https://mock.typst.test",
-      fetchImpl: async (url, init) => {
+      fetchImpl: (async (url: any, init: any) => {
         const urlStr = url.toString();
         if (urlStr.includes("/v1/graphql")) {
           return Response.json({
@@ -194,12 +194,12 @@ describe("Phase 2 Read Tool: Pagination, Line Numbers & Images", () => {
           });
         }
         if (urlStr.includes("/files/proj-1/img-1")) {
-          return new Response(rawPngBytes, {
+          return new Response(rawPngBytes as unknown as BodyInit, {
             headers: { "Content-Type": "application/octet-stream" },
           });
         }
         return new Response("Not found", { status: 404 });
-      },
+      }) as typeof fetch,
     });
 
     const handler = (server as any)._requestHandlers.get("tools/call");

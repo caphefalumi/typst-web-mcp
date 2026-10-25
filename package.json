@@ -46,12 +46,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.0",
+    "diff": "^9.0.0",
     "lib0": "^0.2.99",
     "yjs": "^13.6.24",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/diff": "^8.0.0",
     "@types/node": "^25.0.3",
     "typescript": "^5.8.2"
   }

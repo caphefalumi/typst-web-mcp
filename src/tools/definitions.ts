@@ -194,7 +194,7 @@ export const TYPST_MCP_TOOLS: Tool[] = [
   {
     name: "typst_edit_file",
     description:
-      "Apply one or more exact surgical text replacements (oldText -> newText) directly to a multiplayer file's Yjs CRDT document in a https://typst.app project.",
+      "Apply one or more surgical text replacements (oldText -> newText) directly to a multiplayer file's Yjs CRDT document in a https://typst.app project. Supports CRLF/LF resilience, UTF-8 BOM preservation, fuzzy matching for Unicode quotes/dashes/whitespace, and returns a unified diff and patch of the changes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -209,13 +209,13 @@ export const TYPST_MCP_TOOLS: Tool[] = [
         edits: {
           type: "array",
           description:
-            "Non-overlapping exact text replacements to apply to the Yjs document",
+            "One or more targeted non-overlapping replacements. Each oldText must be unique in the original file.",
           items: {
             type: "object",
             properties: {
               oldText: {
                 type: "string",
-                description: "Exact unique substring to replace",
+                description: "Unique substring to replace (matches exact or normalized quotes/dashes)",
               },
               newText: {
                 type: "string",
@@ -225,13 +225,23 @@ export const TYPST_MCP_TOOLS: Tool[] = [
             required: ["oldText", "newText"],
           },
         },
+        oldText: {
+          type: "string",
+          description:
+            "Optional shorthand for a single replacement (used if edits is omitted)",
+        },
+        newText: {
+          type: "string",
+          description:
+            "Optional replacement text for single replacement shorthand",
+        },
         preferWebSocket: {
           type: "boolean",
           description:
             "Push real-time TextUpdate over /editing/v3 WebSocket in addition to REST persistence (default: true)",
         },
       },
-      required: ["projectId", "filePath", "edits"],
+      required: ["projectId", "filePath"],
     },
   },
   {

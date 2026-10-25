@@ -100,9 +100,9 @@ See [`docs/PROTOCOL.md`](./docs/PROTOCOL.md) for the complete reverse-engineered
 | **Projects** | `typst_create_project` | Create a new `typst.app` cloud project with initial `.typ`/`.bib` files and pinned compiler version. |
 | **Projects** | `typst_delete_project` | Permanently delete a `typst.app` project by ID (`DeleteProjectMutation`). |
 | **Files & CRDT** | `typst_list_files` | List all multiplayer Yjs text files and binary asset blobs in a project. |
-| **Files & CRDT** | `typst_read_file` | Read any project file — decodes binary Yjs CRDT state (`doc.getText("text")`) into UTF-8 text or base64 for binary assets. |
-| **Files & CRDT** | `typst_write_file` | Create or overwrite a `.typ`/`.bib`/`.toml` file, syncing Yjs state diffs over `/editing/v3` WebSocket and REST. |
-| **Files & CRDT** | `typst_edit_file` | Apply non-overlapping surgical `oldText -> newText` replacements directly to the `Y.Text("text")` CRDT. |
+| **Files & CRDT** | `typst_read_file` | Read any project file with offset/limit pagination, optional line numbering, truncation limits (2,000 lines/50KB), and multimodal MCP image content blocks (`PNG`, `JPG`, `SVG`, `WebP`). |
+| **Files & CRDT** | `typst_write_file` | Create or overwrite a `.typ`/`.bib`/`.toml` file, protected by per-file mutation queue serialization, syncing Yjs state diffs over `/editing/v3` WebSocket and REST. |
+| **Files & CRDT** | `typst_edit_file` | Apply surgical `oldText -> newText` replacements directly to the `Y.Text("text")` CRDT with CRLF/BOM resilience, fuzzy quote/dash matching, unified diff & patch output, and per-file mutation serialization. |
 | **Assets & Tree** | `typst_upload_asset` | Upload or replace binary assets (`PNG`, `JPG`, `SVG`, `PDF`, fonts) from a local path or base64 payload. |
 | **Assets & Tree** | `typst_rename_file` | Rename or move a file inside a `typst.app` project (`UpdatesFileMutation`). |
 | **Assets & Tree** | `typst_delete_file` | Delete a file or binary asset from a project (`DeleteFilesMutation`). |
@@ -149,6 +149,7 @@ typst-web-mcp/
 │   └── PROTOCOL.md              # Reverse-engineered typst.app REST, GraphQL, Yjs & WS v3 spec
 ├── src/
 │   ├── protocol/
+│   │   ├── edit-diff.ts         # Fuzzy matching, CRLF/BOM resilience, unified diff & patch generator
 │   │   ├── ws-codec.ts          # Binary lib0 /editing/v3 WebSocket encoder & decoder
 │   │   ├── yjs-doc.ts           # Yjs CRDT text decoding, replacement & surgical patching
 │   │   └── graphql.ts           # GraphQL queries, mutations, fragments & types
@@ -159,6 +160,10 @@ typst-web-mcp/
 │   │   └── typst-client.ts      # TypstCloudClient (REST, GraphQL, WebSocket v3, Compiler facade)
 │   ├── tools/
 │   │   └── definitions.ts       # MCP JSON Schema definitions for all 16 tools
+│   ├── utils/
+│   │   ├── file-mutation-queue.ts # Serialized mutation mutex queue per file
+│   │   ├── mime.ts              # Image MIME type detection
+│   │   └── truncate.ts          # Dual-limit (line & byte) head/tail truncation utilities
 │   └── index.ts                 # MCP stdio server entrypoint (dev); npm bin runs dist/index.js
 ├── test/
 │   └── typst-mcp.test.ts        # 7 test suites (57 assertions) covering codecs, CRDTs & E2E

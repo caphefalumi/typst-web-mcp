@@ -41,6 +41,7 @@ import {
   type TruncationResult,
 } from "../utils/truncate.js";
 import { detectSupportedImageMimeType } from "../utils/mime.js";
+import { withFileMutationQueue } from "../utils/file-mutation-queue.js";
 
 export { TypstLoadError, resolveTypstBinary, type TypstDiagnostic };
 
@@ -708,57 +709,59 @@ export class TypstCloudClient {
     bytesWritten: number;
     syncChannel: "websocket+rest" | "rest";
   }> {
-    const files = await this.listFiles(projectId);
     const normalized = filePathOrId.replace(/^\/+/, "");
-    const existing =
-      files.find((f) => f.id === filePathOrId) ??
-      files.find((f) => f.name === normalized || f.name === filePathOrId);
+    return withFileMutationQueue(`${projectId}:${normalized}`, async () => {
+      const files = await this.listFiles(projectId);
+      const existing =
+        files.find((f) => f.id === filePathOrId) ??
+        files.find((f) => f.name === normalized || f.name === filePathOrId);
 
-    if (existing) {
-      if (existing.isMultiplayable) {
-        const remote = await this.downloadFileYjs(projectId, existing.id);
-        const { encodedUpdate } = replaceYjsText(remote, content);
-        const { syncChannel } = await this.saveYjsUpdate(
-          projectId,
-          existing.id,
-          encodedUpdate,
-          options?.preferWebSocket ?? true
+      if (existing) {
+        if (existing.isMultiplayable) {
+          const remote = await this.downloadFileYjs(projectId, existing.id);
+          const { encodedUpdate } = replaceYjsText(remote, content);
+          const { syncChannel } = await this.saveYjsUpdate(
+            projectId,
+            existing.id,
+            encodedUpdate,
+            options?.preferWebSocket ?? true
+          );
+          return {
+            file: existing,
+            created: false,
+            bytesWritten: Buffer.byteLength(content, "utf8"),
+            syncChannel,
+          };
+        }
+        const rawBytes = new TextEncoder().encode(content);
+        const { response } = await this.restCall(
+          "PUT",
+          `files/${projectId}/${existing.id}`,
+          { body: rawBytes }
         );
+        const updatedMeta = (await response.json()) as TypstFileMeta;
         return {
-          file: existing,
+          file: updatedMeta,
           created: false,
-          bytesWritten: Buffer.byteLength(content, "utf8"),
-          syncChannel,
+          bytesWritten: rawBytes.byteLength,
+          syncChannel: "rest",
         };
       }
+
       const rawBytes = new TextEncoder().encode(content);
-      const { response } = await this.restCall(
-        "PUT",
-        `files/${projectId}/${existing.id}`,
-        { body: rawBytes }
-      );
-      const updatedMeta = (await response.json()) as TypstFileMeta;
+      const { response } = await this.restCall("POST", `files/${projectId}`, {
+        queryParams: { name: normalized, convert: "false" },
+        body: rawBytes,
+      });
+      const body = (await response.json()) as TypstFileMeta | TypstFileMeta[];
+      const createdMeta = unwrapSingleOrFirstFile(body);
       return {
-        file: updatedMeta,
-        created: false,
+        file: createdMeta,
+        created: true,
         bytesWritten: rawBytes.byteLength,
         syncChannel: "rest",
       };
-    }
-
-    const rawBytes = new TextEncoder().encode(content);
-    const { response } = await this.restCall("POST", `files/${projectId}`, {
-      queryParams: { name: normalized, convert: "false" },
-      body: rawBytes,
     });
-    const body = (await response.json()) as TypstFileMeta | TypstFileMeta[];
-    const createdMeta = unwrapSingleOrFirstFile(body);
-    return {
-      file: createdMeta,
-      created: true,
-      bytesWritten: rawBytes.byteLength,
-      syncChannel: "rest",
-    };
   }
 
   async editFile(
@@ -771,6 +774,9 @@ export class TypstCloudClient {
     appliedCount: number;
     previousLength: number;
     updatedLength: number;
+    diff: string;
+    patch: string;
+    firstChangedLine?: number;
     syncChannel: "websocket+rest" | "rest";
   }> {
     const file = await this.resolveFile(projectId, filePathOrId);
@@ -781,24 +787,36 @@ export class TypstCloudClient {
       );
     }
 
-    const remote = await this.downloadFileYjs(projectId, file.id);
-    const { encodedUpdate, previousText, updatedText, appliedCount } =
-      editYjsText(remote, edits);
+    return withFileMutationQueue(`${projectId}:${file.id}`, async () => {
+      const remote = await this.downloadFileYjs(projectId, file.id);
+      const {
+        encodedUpdate,
+        previousText,
+        updatedText,
+        appliedCount,
+        diff,
+        patch,
+        firstChangedLine,
+      } = editYjsText(remote, edits, file.name);
 
-    const { syncChannel } = await this.saveYjsUpdate(
-      projectId,
-      file.id,
-      encodedUpdate,
-      options?.preferWebSocket ?? true
-    );
+      const { syncChannel } = await this.saveYjsUpdate(
+        projectId,
+        file.id,
+        encodedUpdate,
+        options?.preferWebSocket ?? true
+      );
 
-    return {
-      file,
-      appliedCount,
-      previousLength: previousText.length,
-      updatedLength: updatedText.length,
-      syncChannel,
-    };
+      return {
+        file,
+        appliedCount,
+        previousLength: previousText.length,
+        updatedLength: updatedText.length,
+        diff,
+        patch,
+        firstChangedLine,
+        syncChannel,
+      };
+    });
   }
 
   async uploadAsset(

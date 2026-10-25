@@ -31,6 +31,43 @@ function resolveOptionalNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+export function prepareEditArguments(
+  input: unknown
+): Array<{ oldText: string; newText: string }> {
+  if (!input) return [];
+  if (Array.isArray(input)) {
+    return input.filter(
+      (e) =>
+        e && typeof e.oldText === "string" && typeof e.newText === "string"
+    );
+  }
+  if (typeof input === "string") {
+    try {
+      const parsed = JSON.parse(input);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (e) =>
+            e && typeof e.oldText === "string" && typeof e.newText === "string"
+        );
+      }
+      if (
+        parsed &&
+        typeof parsed.oldText === "string" &&
+        typeof parsed.newText === "string"
+      ) {
+        return [parsed];
+      }
+    } catch {}
+  }
+  if (typeof input === "object" && input !== null) {
+    const obj = input as Record<string, unknown>;
+    if (typeof obj.oldText === "string" && typeof obj.newText === "string") {
+      return [{ oldText: obj.oldText, newText: obj.newText }];
+    }
+  }
+  return [];
+}
+
 export async function dispatchTypstTool(
   client: TypstCloudClient,
   name: string,
@@ -95,15 +132,24 @@ export async function dispatchTypstTool(
         }
       );
 
-    case "typst_edit_file":
+    case "typst_edit_file": {
+      let edits = prepareEditArguments(args.edits);
+      if (
+        edits.length === 0 &&
+        typeof args.oldText === "string" &&
+        typeof args.newText === "string"
+      ) {
+        edits = [{ oldText: args.oldText, newText: args.newText }];
+      }
       return await client.editFile(
         String(args.projectId),
         String(args.filePath),
-        (args.edits as { oldText: string; newText: string }[]) ?? [],
+        edits,
         {
           preferWebSocket: resolvePreferWebSocket(args.preferWebSocket),
         }
       );
+    }
 
     case "typst_upload_asset": {
       let bytes: Uint8Array;

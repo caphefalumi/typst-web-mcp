@@ -1,8 +1,30 @@
 import * as Y from "yjs";
+import * as Diff from "diff";
+import {
+  applyEditsToNormalizedContent,
+  detectLineEnding,
+  generateDiffString,
+  generateUnifiedPatch,
+  normalizeToLF,
+  restoreLineEndings,
+  splitBom,
+  type Edit,
+} from "./edit-diff.js";
 
 export interface TextEditOperation {
   oldText: string;
   newText: string;
+}
+
+export interface EditYjsTextResult {
+  encodedUpdate: Uint8Array;
+  mergedState: Uint8Array;
+  previousText: string;
+  updatedText: string;
+  appliedCount: number;
+  diff: string;
+  patch: string;
+  firstChangedLine?: number;
 }
 
 function computeUpdateDiff(
@@ -94,20 +116,15 @@ export function replaceYjsText(
 }
 
 /**
- * Applies one or more exact surgical text replacements (`oldText` -> `newText`)
- * directly on the `Y.Text("text")` CRDT so concurrent collaborator cursors and
- * history are preserved.
+ * Applies one or more surgical text replacements (`oldText` -> `newText`)
+ * directly on the `Y.Text("text")` CRDT, with CRLF/BOM resilience, fuzzy matching,
+ * and unified diff generation.
  */
 export function editYjsText(
   remoteUpdate: Uint8Array,
-  edits: TextEditOperation[]
-): {
-  encodedUpdate: Uint8Array;
-  mergedState: Uint8Array;
-  previousText: string;
-  updatedText: string;
-  appliedCount: number;
-} {
+  edits: TextEditOperation[],
+  filePath = "file"
+): EditYjsTextResult {
   if (edits.length === 0) {
     throw new Error("At least one edit operation is required");
   }
@@ -120,69 +137,47 @@ export function editYjsText(
     const ytext = doc.getText("text");
     const previousText = ytext.toString();
 
-    const matchedRegions: {
-      start: number;
-      end: number;
-      oldText: string;
-      newText: string;
-    }[] = [];
+    const { bom, text: contentWithoutBom } = splitBom(previousText);
+    const originalEnding = detectLineEnding(contentWithoutBom);
+    const normalizedContent = normalizeToLF(contentWithoutBom);
 
-    for (const edit of edits) {
-      if (!edit.oldText) {
-        throw new Error("oldText cannot be empty in surgical edit");
-      }
-      const firstIdx = previousText.indexOf(edit.oldText);
-      if (firstIdx === -1) {
-        throw new Error(
-          `Could not find exact oldText match: ${JSON.stringify(
-            edit.oldText.slice(0, 80)
-          )}`
-        );
-      }
-      const secondIdx = previousText.indexOf(edit.oldText, firstIdx + 1);
-      if (secondIdx !== -1) {
-        throw new Error(
-          `oldText is not unique in file (found at offset ${firstIdx} and ${secondIdx}): ${JSON.stringify(
-            edit.oldText.slice(0, 80)
-          )}`
-        );
-      }
-      matchedRegions.push({
-        start: firstIdx,
-        end: firstIdx + edit.oldText.length,
-        oldText: edit.oldText,
-        newText: edit.newText,
-      });
-    }
+    const { baseContent, newContent } = applyEditsToNormalizedContent(
+      normalizedContent,
+      edits,
+      filePath
+    );
 
-    matchedRegions.sort((a, b) => b.start - a.start);
-    for (let i = 0; i < matchedRegions.length - 1; i++) {
-      const upper = matchedRegions[i]!;
-      const lower = matchedRegions[i + 1]!;
-      if (lower.end > upper.start) {
-        throw new Error(
-          `Overlapping edit regions detected between [${lower.start}, ${lower.end}) and [${upper.start}, ${upper.end})`
-        );
-      }
-    }
+    const finalContent = bom + restoreLineEndings(newContent, originalEnding);
 
+    // Apply minimal surgical character changes to Y.Text
+    const diffs = Diff.diffChars(previousText, finalContent);
     doc.transact(() => {
-      for (const region of matchedRegions) {
-        ytext.delete(region.start, region.oldText.length);
-        if (region.newText.length > 0) {
-          ytext.insert(region.start, region.newText);
+      let offset = 0;
+      for (const part of diffs) {
+        if (part.added) {
+          ytext.insert(offset, part.value);
+          offset += part.value.length;
+        } else if (part.removed) {
+          ytext.delete(offset, part.value.length);
+        } else {
+          offset += part.value.length;
         }
       }
     });
 
     const { encodedUpdate, mergedState } = computeUpdateDiff(doc, remoteUpdate);
+    const diffResult = generateDiffString(baseContent, newContent);
+    const patch = generateUnifiedPatch(filePath, baseContent, newContent);
 
     return {
       encodedUpdate,
       mergedState,
       previousText,
-      updatedText: ytext.toString(),
-      appliedCount: matchedRegions.length,
+      updatedText: finalContent,
+      appliedCount: edits.length,
+      diff: diffResult.diff,
+      patch,
+      firstChangedLine: diffResult.firstChangedLine,
     };
   } finally {
     doc.destroy();
