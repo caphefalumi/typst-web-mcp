@@ -25,10 +25,10 @@
 **Recommended — no clone, no global install:**
 
 ```bash
-npx -y typst-mcp
+npx -y typst-mcp@latest
 ```
 
-Runs the published [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) package (Node `>= 18`). Use the same command in MCP config below. `-y` skips the npx install prompt.
+Runs the published [`typst-mcp`](https://www.npmjs.com/package/typst-mcp) package (Node `>= 18`). Using `@latest` ensures your MCP client always pulls the newest releases without stale cache issues. `-y` skips the npx confirmation prompt.
 
 **From source (development):**
 
@@ -48,7 +48,7 @@ Add `typst-mcp` to your MCP client configuration (`.pi/agent/mcp-adapter.json`, 
   "mcpServers": {
     "typst-mcp": {
       "command": "npx",
-      "args": ["-y", "typst-mcp"],
+      "args": ["-y", "typst-mcp@latest"],
       "env": {
         "TYPST_EMAIL": "your-email@example.com",
         "TYPST_PASSWORD": "your-password"
