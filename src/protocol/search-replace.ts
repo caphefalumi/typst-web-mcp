@@ -198,10 +198,26 @@ export function replaceBatchInContent(
       if (!options.regex) {
         return options.replacement;
       }
-      // For regex, support replacement with capture groups ($1, $2).
-      return options.replacement.replace(/\$(\d+)/g, (_, groupIdx) => {
-        const idx = parseInt(groupIdx, 10);
-        return args[idx - 1] ?? "";
+      // The final callback arguments are offset/input and optional named groups,
+      // not captures. Implement JS replacement tokens without exposing metadata.
+      const hasNamedGroups = typeof args[args.length - 1] === "object";
+      const groups = hasNamedGroups ? args[args.length - 1] : undefined;
+      const input = args[args.length - (hasNamedGroups ? 2 : 1)] as string;
+      const offset = args[args.length - (hasNamedGroups ? 3 : 2)] as number;
+      const captures = args.slice(0, hasNamedGroups ? -3 : -2);
+      return options.replacement.replace(/\$(\$|&|`|'|\d{1,2}|<[^>]*>)/g, (token, key: string) => {
+        if (key === "$") return "$";
+        if (key === "&") return match;
+        if (key === "`") return input.slice(0, offset);
+        if (key === "'") return input.slice(offset + match.length);
+        if (key.startsWith("<")) return groups ? groups[key.slice(1, -1)] ?? "" : token;
+        const index = Number(key);
+        if (index > 0 && index <= captures.length) return captures[index - 1] ?? "";
+        const first = Number(key[0]);
+        if (key.length === 2 && first > 0 && first <= captures.length) {
+          return (captures[first - 1] ?? "") + key[1];
+        }
+        return token;
       });
     });
     replacementCounts.push(count);

@@ -153,6 +153,20 @@ describe("Search & Global Replace Utilities (search-replace.ts)", () => {
     expect(result.replacementCount).toBe(2);
     expect(result.updatedText).toBe("@ref1 and @ref2");
   });
+
+  it("matches native replacement semantics without confusing metadata with captures", () => {
+    for (const [content, pattern, replacement] of [
+      ["abc", "b", "$1 $2 $0 $99"],
+      ["abc", "(b)", "$1 $2 $10 $01 $00"],
+      ["abc", "(b)(z)?", "$1-$2-$3-$20"],
+      ["abc", "(?<letter>b)", "$<letter>-$<missing>-$1-$2"],
+      ["abc", "b", "$<letter> $$ $& $` $'"],
+      ["b b", "(b)", "$`-$&-$'"],
+    ]) {
+      expect(replaceInContent("main.typ", content!, { pattern: pattern!, replacement: replacement!, regex: true }).updatedText)
+        .toBe(content!.replace(new RegExp(pattern!, "g"), replacement!));
+    }
+  });
 });
 
 describe("typst_grep_project Tool", () => {
