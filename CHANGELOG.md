@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-10-25
+
+- feat: bump version to 1.2.0 (f4c40b7)
+- feat(compiler): support Typst Web cloud diagnostics with zero-binary fallback (e467647)
+- docs(readme): remove architecture diagram and project structure sections (d6c1cbb)
+- docs(readme): present standard and @latest options for npx install and config (77b63fb)
+- docs(readme): add @latest to npx install and MCP client config (0cdd913)
+
 ## [1.1.0] - 2026-10-25
 
 ### Added
