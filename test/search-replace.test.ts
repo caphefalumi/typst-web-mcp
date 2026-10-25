@@ -19,7 +19,8 @@ function createMockProjectClient(
     name: string;
     isMultiplayable: boolean;
     content: string;
-  }>
+  }>,
+  requests = { downloads: 0, saves: 0 }
 ) {
   const fileYjsMap = new Map(
     files.map((f) => [f.id, createInitialYjsUpdate(f.content)])
@@ -56,6 +57,7 @@ function createMockProjectClient(
 
       // Download Yjs text
       if (urlStr.includes("/yjs") && (!init?.method || init.method === "GET")) {
+        requests.downloads++;
         const match = urlStr.match(/\/files\/proj-search\/([^/]+)\/yjs/);
         const fileId = match?.[1] ?? "";
         const yjsBytes = fileYjsMap.get(fileId) ?? new Uint8Array();
@@ -66,6 +68,7 @@ function createMockProjectClient(
 
       // Save Yjs text (PUT)
       if (urlStr.includes("/yjs") && init?.method === "PUT") {
+        requests.saves++;
         const match = urlStr.match(/\/files\/proj-search\/([^/]+)\/yjs/);
         const fileId = match?.[1] ?? "";
         const incoming =
@@ -218,6 +221,138 @@ describe("typst_grep_project Tool", () => {
 });
 
 describe("typst_find_and_replace Tool", () => {
+  it("expands multiple months with one download/save per changed text file and compact output", async () => {
+    const requests = { downloads: 0, saves: 0 };
+    const client = createMockProjectClient([
+      { id: "f-1", name: "main.typ", isMultiplayable: true, content: "Sep 2025 — Oct 2025\nSep 2026" },
+      { id: "f-2", name: "chapter.typ", isMultiplayable: true, content: "Oct 2026" },
+      { id: "f-3", name: "figure.png", isMultiplayable: false, content: "Sep" },
+    ], requests);
+    const res = await dispatchTypstTool(client, "typst_find_and_replace", {
+      projectId: "proj-search",
+      replacements: [
+        { pattern: "\\bSep\\b", replacement: "September", regex: true },
+        { pattern: "\\bOct\\b", replacement: "October", regex: true },
+      ],
+      preferWebSocket: false,
+    }) as any;
+    expect(requests).toEqual({ downloads: 2, saves: 2 });
+    expect(res.totalReplacements).toBe(4);
+    expect(res.filesModified[0]).toEqual({ file: "main.typ", replacementsCount: 3, replacementCounts: [2, 1], firstChangedLine: 1 });
+    expect(res.filesModified[1].replacementCounts).toEqual([0, 1]);
+    expect((await client.readFile("proj-search", "main.typ")).content)
+      .toBe("September 2025 — October 2025\nSeptember 2026");
+  });
+
+  it("previews sequential rules with per-rule options without saving", async () => {
+    const requests = { downloads: 0, saves: 0 };
+    const client = createMockProjectClient([
+      { id: "f-1", name: "main.typ", isMultiplayable: true, content: "sep SEP Sep\r\n" },
+    ], requests);
+    const res = await dispatchTypstTool(client, "typst_find_and_replace", {
+      projectId: "proj-search", filePath: "main.typ", dryRun: true, output: "diff",
+      replacements: [
+        { pattern: "sep", replacement: "September", ignoreCase: true, limit: 2 },
+        { pattern: "(September)", replacement: "$1!", regex: true },
+      ],
+    }) as any;
+    expect(requests).toEqual({ downloads: 1, saves: 0 });
+    expect(res.filesModified[0].replacementCounts).toEqual([2, 2]);
+    expect(res.filesModified[0].diff).toContain("September! September! Sep");
+    expect(res.filesModified[0]).not.toHaveProperty("patch");
+    expect((await client.readFile("proj-search", "main.typ")).content).toBe("sep SEP Sep\r\n");
+  });
+
+  it("rejects invalid requests before downloading or saving any files", async () => {
+    const requests = { downloads: 0, saves: 0 };
+    const client = createMockProjectClient([
+      { id: "f-1", name: "main.typ", isMultiplayable: true, content: "Sep" },
+    ], requests);
+    for (const args of [
+      {}, { replacements: [] },
+      { pattern: "Sep", replacement: "September", replacements: [{ pattern: "Sep", replacement: "September" }] },
+      { replacements: [{ pattern: "Sep", replacement: "September" }, { pattern: "[", replacement: "", regex: true }] },
+      { pattern: "", replacement: "" },
+      { pattern: "Sep", replacement: "September", limit: -1 },
+      { pattern: "Sep", replacement: "September", output: "unknown" },
+      { replacements: [{ pattern: "Sep", replacement: "September" }], ignoreCase: true },
+      { replacements: [{ pattern: "Sep", replacement: "September", regex: "false" }] },
+    ]) {
+      await expect(dispatchTypstTool(client, "typst_find_and_replace", { projectId: "proj-search", ...args })).rejects.toThrow();
+    }
+    expect(requests).toEqual({ downloads: 0, saves: 0 });
+  });
+
+  it("skips no-op writes and reports a missing explicit file", async () => {
+    const requests = { downloads: 0, saves: 0 };
+    const client = createMockProjectClient([
+      { id: "f-1", name: "main.typ", isMultiplayable: true, content: "Sep" },
+    ], requests);
+    for (const replacements of [
+      [{ pattern: "Sep", replacement: "Sep" }],
+      [{ pattern: "Sep", replacement: "September" }, { pattern: "September", replacement: "Sep" }],
+      [{ pattern: "Oct", replacement: "October" }],
+    ]) {
+      const res = await dispatchTypstTool(client, "typst_find_and_replace", { projectId: "proj-search", replacements }) as any;
+      expect(res.filesModified).toEqual([]);
+      expect(res.totalReplacements).toBe(0);
+    }
+    expect(requests.saves).toBe(0);
+    await expect(dispatchTypstTool(client, "typst_find_and_replace", {
+      projectId: "proj-search", filePath: "missing.typ", pattern: "Sep", replacement: "September",
+    })).rejects.toThrow("Text file not found");
+  });
+
+  it("allows concurrent batches without losing earlier changes", async () => {
+    const client = createMockProjectClient([
+      { id: "f-1", name: "main.typ", isMultiplayable: true, content: "Sep Oct" },
+    ]);
+    await Promise.all([ ["Sep", "September"], ["Oct", "October"] ].map(([pattern, replacement]) =>
+      dispatchTypstTool(client, "typst_find_and_replace", {
+        projectId: "proj-search", replacements: [{ pattern, replacement }], preferWebSocket: false,
+      })
+    ));
+    expect((await client.readFile("proj-search", "main.typ")).content).toBe("September October");
+  });
+
+  it("supports full batch output, file IDs, literal dollar text, and zero limits", async () => {
+    const client = createMockProjectClient([
+      { id: "f-1", name: "main.typ", isMultiplayable: true, content: "\uFEFFSep Oct\r\n" },
+      { id: "f-2", name: "refs.bib", isMultiplayable: true, content: "Sep Oct" },
+    ]);
+    const res = await dispatchTypstTool(client, "typst_find_and_replace", {
+      projectId: "proj-search", filePath: "f-1", output: "full", preferWebSocket: false,
+      replacements: [
+        { pattern: "Sep", replacement: "$1 September" },
+        { pattern: "Oct", replacement: "October", limit: 0 },
+      ],
+    }) as any;
+    expect(res.filesModified[0].diff).toContain("$1 September Oct");
+    expect(res.filesModified[0].patch).toContain("--- main.typ");
+    expect(res.filesModified[0].replacementCounts).toEqual([1, 0]);
+    expect((await client.readFile("proj-search", "main.typ")).content).toBe("\uFEFF$1 September Oct\r\n");
+    expect((await client.readFile("proj-search", "refs.bib")).content).toBe("Sep Oct");
+  });
+
+  it("supports summary output on single replacements and glob filtering for batches", async () => {
+    const client = createMockProjectClient([
+      { id: "f-1", name: "main.typ", isMultiplayable: true, content: "Sep" },
+      { id: "f-2", name: "refs.bib", isMultiplayable: true, content: "Sep" },
+    ]);
+    const single = await dispatchTypstTool(client, "typst_find_and_replace", {
+      projectId: "proj-search", filePath: "main.typ", output: "summary", dryRun: true,
+      pattern: "Sep", replacement: "September",
+    }) as any;
+    expect(single.filesModified[0]).not.toHaveProperty("diff");
+    expect(single.filesModified[0]).not.toHaveProperty("patch");
+    const batch = await dispatchTypstTool(client, "typst_find_and_replace", {
+      projectId: "proj-search", glob: "*.typ", preferWebSocket: false,
+      replacements: [{ pattern: "Sep", replacement: "September" }],
+    }) as any;
+    expect(batch.filesModified.length).toBe(1);
+    expect((await client.readFile("proj-search", "refs.bib")).content).toBe("Sep");
+  });
+
   it("performs dryRun find and replace returning diff without persisting", async () => {
     const client = createMockProjectClient([
       {

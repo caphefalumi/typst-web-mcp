@@ -212,11 +212,14 @@ export function fuzzyFindText(
     };
   }
 
-  const fuzzyContent = normalizeForFuzzyMatch(content);
+  const { normalized: fuzzyContent, starts, ends } = fuzzyTextWithOffsets(content);
   const fuzzyOldText = normalizeForFuzzyMatch(oldText);
-  const fuzzyIndex = fuzzyContent.indexOf(fuzzyOldText);
+  const fuzzyIndex = fuzzyOldText.length ? fuzzyContent.indexOf(fuzzyOldText) : -1;
 
-  if (fuzzyIndex === -1) {
+  // Do not replace part of an expanded Unicode grapheme (e.g. one f in ﬃ).
+  const last = fuzzyIndex + fuzzyOldText.length - 1;
+  if (fuzzyIndex === -1 || starts[fuzzyIndex] === starts[fuzzyIndex - 1] ||
+      ends[last] === ends[last + 1]) {
     return {
       found: false,
       index: -1,
@@ -228,25 +231,77 @@ export function fuzzyFindText(
 
   return {
     found: true,
-    index: fuzzyIndex,
-    matchLength: fuzzyOldText.length,
+    index: starts[fuzzyIndex]!,
+    matchLength: ends[last]! - starts[fuzzyIndex]!,
     usedFuzzyMatch: true,
-    contentForReplacement: fuzzyContent,
+    contentForReplacement: content,
   };
 }
 
+/** Keep original offsets so fallback matching cannot normalize unrelated text. */
+function fuzzyTextWithOffsets(content: string) {
+  let normalized = "";
+  const starts: number[] = [];
+  const ends: number[] = [];
+  const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+  for (const { segment, index } of segmenter.segment(content)) {
+    // Append a sentinel so trailing spaces are retained until the line-level trim.
+    const value = normalizeForFuzzyMatch(segment + "\u0000").slice(0, -1);
+    normalized += value;
+    for (let i = 0; i < value.length; i++) {
+      starts.push(index);
+      ends.push(index + segment.length);
+    }
+  }
+  let offset = 0;
+  const keptStarts: number[] = [];
+  const keptEnds: number[] = [];
+  const trimmedLines = normalized.split("\n").map(line => {
+    const trimmed = line.trimEnd();
+    for (let i = 0; i < trimmed.length; i++) {
+      keptStarts.push(starts[offset + i]!);
+      keptEnds.push(ends[offset + i]!);
+    }
+    offset += line.length;
+    if (offset < normalized.length) {
+      keptStarts.push(starts[offset]!);
+      keptEnds.push(ends[offset]!);
+      offset++;
+    }
+    return trimmed;
+  });
+  return { normalized: trimmedLines.join("\n"), starts: keptStarts, ends: keptEnds };
+}
+
 export function countOccurrences(content: string, oldText: string): number {
-  const fuzzyContent = normalizeForFuzzyMatch(content);
-  const fuzzyOldText = normalizeForFuzzyMatch(oldText);
-  if (fuzzyOldText.length === 0) return 0;
-  return fuzzyContent.split(fuzzyOldText).length - 1;
+  if (!oldText.length) return 0;
+  let count = 0;
+  let offset = content.indexOf(oldText);
+  while (offset !== -1) {
+    count++;
+    offset = content.indexOf(oldText, offset + 1);
+  }
+  return count;
+}
+
+export function validateEdits(edits: Edit[]): void {
+  if (!Array.isArray(edits) || edits.length === 0) {
+    throw new Error("At least one edit operation is required");
+  }
+  for (const [index, edit] of edits.entries()) {
+    if (!edit || typeof edit.oldText !== "string" || typeof edit.newText !== "string" || !edit.oldText.length) {
+      throw new Error(`Edit ${index + 1} requires a non-empty oldText and a string newText.`);
+    }
+  }
 }
 
 export function applyEditsToNormalizedContent(
   normalizedContent: string,
   edits: Edit[],
-  path: string
-): { baseContent: string; newContent: string } {
+  path: string,
+  matchMode: "exact" | "fuzzy" = "fuzzy"
+): { baseContent: string; newContent: string; matchedEdits: MatchedEdit[]; usedFuzzyMatch: boolean } {
+  validateEdits(edits);
   const normalizedEdits = edits.map((e) => ({
     oldText: normalizeToLF(e.oldText),
     newText: normalizeToLF(e.newText),
@@ -258,18 +313,14 @@ export function applyEditsToNormalizedContent(
     }
   }
 
-  const initialMatches = normalizedEdits.map((e) =>
-    fuzzyFindText(normalizedContent, e.oldText)
-  );
-  const usedFuzzyMatch = initialMatches.some((m) => m.usedFuzzyMatch);
-  const replacementBaseContent = usedFuzzyMatch
-    ? normalizeForFuzzyMatch(normalizedContent)
-    : normalizedContent;
-
+  let usedFuzzyMatch = false;
   const matchedEdits: MatchedEdit[] = [];
   for (let i = 0; i < normalizedEdits.length; i++) {
     const edit = normalizedEdits[i]!;
-    const matchResult = fuzzyFindText(replacementBaseContent, edit.oldText);
+    const exactIndex = normalizedContent.indexOf(edit.oldText);
+    const matchResult = exactIndex !== -1 ? {
+      found: true, index: exactIndex, matchLength: edit.oldText.length, usedFuzzyMatch: false,
+    } : matchMode === "fuzzy" ? fuzzyFindText(normalizedContent, edit.oldText) : { found: false };
     if (!matchResult.found) {
       throw new Error(
         `Could not find match for oldText in ${path}: ${JSON.stringify(
@@ -278,9 +329,11 @@ export function applyEditsToNormalizedContent(
       );
     }
 
+    const fuzzy = Boolean(matchResult.usedFuzzyMatch);
+    usedFuzzyMatch ||= fuzzy;
     const occurrences = countOccurrences(
-      replacementBaseContent,
-      edit.oldText
+      fuzzy ? normalizeForFuzzyMatch(normalizedContent) : normalizedContent,
+      fuzzy ? normalizeForFuzzyMatch(edit.oldText) : edit.oldText
     );
     if (occurrences > 1) {
       throw new Error(
@@ -292,8 +345,8 @@ export function applyEditsToNormalizedContent(
 
     matchedEdits.push({
       editIndex: i,
-      matchIndex: matchResult.index,
-      matchLength: matchResult.matchLength,
+      matchIndex: matchResult.index!,
+      matchLength: matchResult.matchLength!,
       newText: edit.newText,
     });
   }
@@ -310,19 +363,13 @@ export function applyEditsToNormalizedContent(
   }
 
   const baseContent = normalizedContent;
-  const newContent = usedFuzzyMatch
-    ? applyReplacementsPreservingUnchangedLines(
-        normalizedContent,
-        replacementBaseContent,
-        matchedEdits
-      )
-    : applyReplacements(replacementBaseContent, matchedEdits);
+  const newContent = applyReplacements(normalizedContent, matchedEdits);
 
   if (baseContent === newContent) {
     throw new Error(`No changes made to ${path}: newText equals oldText.`);
   }
 
-  return { baseContent, newContent };
+  return { baseContent, newContent, matchedEdits, usedFuzzyMatch };
 }
 
 /**
@@ -376,7 +423,7 @@ export function generateDiffString(
     }
 
     if (part.added || part.removed) {
-      if (firstChangedLine === undefined && part.added) {
+      if (firstChangedLine === undefined) {
         firstChangedLine = newLineNum;
       }
 

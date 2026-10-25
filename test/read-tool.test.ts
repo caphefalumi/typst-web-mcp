@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { TypstCloudClient } from "../src/client/typst-client.js";
 import { createInitialYjsUpdate } from "../src/protocol/yjs-doc.js";
-import { createTypstMcpServer } from "../src/index.js";
+import { createTypstMcpServer, dispatchTypstTool } from "../src/index.js";
+import { hashText, readTextContent } from "../src/protocol/read-content.js";
 import { detectSupportedImageMimeType } from "../src/utils/mime.js";
 
 function createMockClientWithFiles(
@@ -82,6 +83,62 @@ function createMockClientWithFiles(
 }
 
 describe("Phase 2 Read Tool: Pagination, Line Numbers & Images", () => {
+  it("paginates with no phantom lines or missing source bytes", () => {
+    for (const text of ["", "\n", "a\n", "a\r\nb\n\nlast", "日本語\n🙂\nlast\n"]) {
+      let offset = 1;
+      let restored = "";
+      do {
+        const result = readTextContent(text, { offset, limit: 1 });
+        restored += result.content;
+        expect(result.contentHash).toBe(hashText(text));
+        if (!result.nextOffset) break;
+        expect(result.nextOffset).toBeGreaterThan(offset);
+        offset = result.nextOffset;
+      } while (true);
+      expect(restored).toBe(text);
+    }
+    expect(readTextContent("a\n").totalLines).toBe(1);
+    expect(readTextContent("").endLine).toBe(0);
+  });
+
+  it("bounds reads by default and counts rendered UTF-8 bytes", () => {
+    const text = Array.from({ length: 300 }, (_, i) => `line${i}\n`).join("");
+    const result = readTextContent(text);
+    expect(result.endLine).toBe(200);
+    expect(result.nextOffset).toBe(201);
+    const bytes = readTextContent("日本語\n🙂\nlast", { maxBytes: 14 });
+    expect(bytes.content).toBe("日本語\n");
+    expect(bytes.nextOffset).toBe(2);
+    expect(bytes.truncatedBy).toBe("bytes");
+    const numbered = readTextContent("a\nb\n", { maxBytes: 6, lineNumbers: true });
+    expect(Buffer.byteLength(numbered.content)).toBeLessThanOrEqual(6);
+    expect(numbered.nextOffset).toBe(2);
+    expect(() => readTextContent("long line", { maxBytes: 3 })).toThrow("Increase maxBytes");
+  });
+
+  it("rejects invalid pagination and budgets instead of silently coercing them", async () => {
+    const client = createMockClientWithFiles([
+      { id: "file-1", name: "main.typ", isMultiplayable: true, content: "a" },
+    ]);
+    for (const options of [
+      { offset: 0 }, { offset: 1.5 }, { limit: 0 }, { limit: -1 }, { limit: "2" },
+      { maxBytes: 0 }, { maxBytes: 1048577 }, { lineNumbers: "false" },
+    ]) await expect(dispatchTypstTool(client, "typst_read_file", { projectId: "proj-1", filePath: "main.typ", ...options })).rejects.toThrow();
+  });
+
+  it("uses compact metadata by default and retains a full metadata option", async () => {
+    const client = createMockClientWithFiles([
+      { id: "file-1", name: "main.typ", isMultiplayable: true, content: "Hello\n" },
+    ]);
+    const args = { projectId: "proj-1", filePath: "main.typ" };
+    const compact = await dispatchTypstTool(client, "typst_read_file", args) as any;
+    const full = await dispatchTypstTool(client, "typst_read_file", { ...args, output: "full" }) as any;
+    expect(compact.file).toEqual({ id: "file-1", name: "main.typ" });
+    expect(full.file.version).toBe(1);
+    expect(compact.content).toBe(full.content);
+    expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(full).length);
+  });
+
   it("detects supported image MIME types correctly", () => {
     expect(detectSupportedImageMimeType("diagram.png")).toBe("image/png");
     expect(detectSupportedImageMimeType("photo.JPG")).toBe("image/jpeg");
@@ -90,7 +147,7 @@ describe("Phase 2 Read Tool: Pagination, Line Numbers & Images", () => {
     expect(detectSupportedImageMimeType("main.typ")).toBeUndefined();
   });
 
-  it("reads with offset and limit pagination and returns continuation hint", async () => {
+  it("reads with offset and limit and keeps continuation metadata out of source", async () => {
     const lines = Array.from({ length: 50 }, (_, i) => `Line ${i + 1}`);
     const fullText = lines.join("\n");
     const client = createMockClientWithFiles([
@@ -109,7 +166,11 @@ describe("Phase 2 Read Tool: Pagination, Line Numbers & Images", () => {
     expect(res.content).toContain("Line 11");
     expect(res.content).toContain("Line 20");
     expect(res.content).not.toContain("Line 21");
-    expect(res.content).toContain("[30 more lines in file. Use offset=21 to continue.]");
+    expect(res.nextOffset).toBe(21);
+    expect(res.truncated).toBe(true);
+    expect(res.contentHash).toBe(hashText(fullText));
+    expect(res.content).toBe(lines.slice(10, 20).join("\n") + "\n");
+    expect(res).not.toHaveProperty("truncation");
   });
 
   it("supports line numbers formatting", async () => {
@@ -144,24 +205,12 @@ describe("Phase 2 Read Tool: Pagination, Line Numbers & Images", () => {
       { id: "img-1", name: "figure.png", isMultiplayable: false, content: rawPngBytes },
     ]);
 
-    const { server } = createTypstMcpServer();
-    // Replace client on server
-    (server as any).client = mockClient;
-
-    // Simulate MCP tool call through server handler
-    const handler = (server as any)._requestHandlers.get("tools/call");
-    const response = await handler({
-      method: "tools/call",
-      params: {
-        name: "typst_read_file",
-        arguments: { projectId: "proj-1", filePath: "figure.png" },
-      },
-    }, {
-      // Mock extra context if needed
-    });
-
-    // Note: createTypstMcpServer closures client inside handlers, so test via dispatchTypstTool or new server
-    expect(true).toBe(true);
+    const response = await dispatchTypstTool(mockClient, "typst_read_file", {
+      projectId: "proj-1", filePath: "figure.png",
+    }) as any;
+    expect(response.isImage).toBe(true);
+    expect(response.mimeType).toBe("image/png");
+    expect(response.content).toBe(Buffer.from(rawPngBytes).toString("base64"));
   });
 
   it("formats image MCP response properly in server handler", async () => {

@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-10-25
+
+### Added
+- Whole-file SHA-256 content hashes on text reads and optional `expectedHash` checks inside the edit mutation queue; dry-run previews for surgical edits.
+- Compact read/edit MCP responses by default, bounded diff/patch output, and explicit metadata/verbosity options.
+- Ordered `replacements` batches for `typst_find_and_replace`, with one download/save per changed file, per-rule counts and options, and validation of every rule before writes.
+- `output: "summary" | "diff" | "full"` for replacement responses. Batches default to compact summaries; legacy single replacements retain full diff and patch output.
+
+### Fixed
+- Reject malformed edit batches instead of silently discarding entries; reject overlapping anchor occurrences and ambiguous edit inputs.
+- Preserve characters outside fuzzy match spans, including Unicode compatibility characters, BOM, and untouched mixed line endings; report first changed lines for deletions.
+- Apply known edit ranges directly to Yjs instead of diffing whole documents character by character, preserving unchanged anchor prefixes/suffixes and Unicode surrogate pairs.
+- Use the shared file ID mutation lock for existing whole-file writes, including writes addressed by path.
+- Keep continuation instructions and duplicated truncation text out of read content; preserve full source bytes across pages without phantom trailing lines.
+- Skip saves when replacements leave the file unchanged, and report an error for a missing explicitly requested text file.
+
+### Changed
+- Text reads default to 200 lines/16 KiB with `nextOffset` continuation and validated positive integer limits. Explicit `limit`/`maxBytes` can request larger pages.
+- Client/MCP surgical edits default to exact matching and summary receipts. Fuzzy fallback and bounded diff/patch responses require explicit options; the low-level `editYjsText` helper keeps its legacy fuzzy default.
+
 ## [1.2.1] - 2026-10-25
 
 ### Changed

@@ -14,6 +14,9 @@ import {
 } from "./client/typst-client.js";
 import { formatUnknownError } from "./client/errors.js";
 import { TYPST_MCP_TOOLS } from "./tools/definitions.js";
+import type { ReplaceContentOptions, ReplacementOutput } from "./protocol/search-replace.js";
+import { validateEdits } from "./protocol/edit-diff.js";
+import { truncateHead } from "./utils/truncate.js";
 
 export { TYPST_MCP_TOOLS };
 
@@ -34,38 +37,24 @@ function resolveOptionalNumber(value: unknown): number | undefined {
 export function prepareEditArguments(
   input: unknown
 ): Array<{ oldText: string; newText: string }> {
-  if (!input) return [];
-  if (Array.isArray(input)) {
-    return input.filter(
-      (e) =>
-        e && typeof e.oldText === "string" && typeof e.newText === "string"
-    );
-  }
+  if (input === undefined) return [];
   if (typeof input === "string") {
     try {
-      const parsed = JSON.parse(input);
-      if (Array.isArray(parsed)) {
-        return parsed.filter(
-          (e) =>
-            e && typeof e.oldText === "string" && typeof e.newText === "string"
-        );
-      }
-      if (
-        parsed &&
-        typeof parsed.oldText === "string" &&
-        typeof parsed.newText === "string"
-      ) {
-        return [parsed];
-      }
-    } catch {}
-  }
-  if (typeof input === "object" && input !== null) {
-    const obj = input as Record<string, unknown>;
-    if (typeof obj.oldText === "string" && typeof obj.newText === "string") {
-      return [{ oldText: obj.oldText, newText: obj.newText }];
+      input = JSON.parse(input);
+    } catch {
+      throw new Error("edits must be an array of {oldText, newText}; invalid JSON.");
     }
   }
-  return [];
+  const edits = (Array.isArray(input) ? input : [input]) as Array<{ oldText: string; newText: string }>;
+  validateEdits(edits);
+  return edits.map(({ oldText, newText }) => ({ oldText, newText }));
+}
+
+function requiredText(args: Record<string, unknown>, key: string): string {
+  if (typeof args[key] !== "string" || !args[key].length) {
+    throw new Error(`${key} must be a non-empty string.`);
+  }
+  return args[key];
 }
 
 export async function dispatchTypstTool(
@@ -108,19 +97,24 @@ export async function dispatchTypstTool(
     case "typst_list_files":
       return await client.listFiles(String(args.projectId));
 
-    case "typst_read_file":
-      return await client.readFile(
-        String(args.projectId),
-        String(args.filePath),
+    case "typst_read_file": {
+      if (args.output !== undefined && args.output !== "compact" && args.output !== "full") {
+        throw new Error("output must be compact or full.");
+      }
+      const result = await client.readFile(
+        requiredText(args, "projectId"),
+        requiredText(args, "filePath"),
         {
-          offset: resolveOptionalNumber(args.offset),
-          limit: resolveOptionalNumber(args.limit),
-          lineNumbers:
-            typeof args.lineNumbers === "boolean"
-              ? args.lineNumbers
-              : undefined,
+          offset: args.offset as number | undefined,
+          limit: args.limit as number | undefined,
+          maxBytes: args.maxBytes as number | undefined,
+          lineNumbers: args.lineNumbers as boolean | undefined,
         }
       );
+      return args.output === "full" ? result : {
+        ...result, file: { id: result.file.id, name: result.file.name },
+      };
+    }
 
     case "typst_write_file":
       return await client.writeFile(
@@ -133,22 +127,55 @@ export async function dispatchTypstTool(
       );
 
     case "typst_edit_file": {
-      let edits = prepareEditArguments(args.edits);
-      if (
-        edits.length === 0 &&
-        typeof args.oldText === "string" &&
-        typeof args.newText === "string"
-      ) {
-        edits = [{ oldText: args.oldText, newText: args.newText }];
+      const hasShorthand = args.oldText !== undefined || args.newText !== undefined;
+      if (args.edits !== undefined && hasShorthand) {
+        throw new Error("Use either edits or oldText/newText, not both.");
       }
-      return await client.editFile(
-        String(args.projectId),
-        String(args.filePath),
+      const edits = prepareEditArguments(args.edits !== undefined ? args.edits :
+        hasShorthand ? { oldText: args.oldText, newText: args.newText } : undefined);
+      const output = args.output ?? (args.dryRun === true ? "diff" : "summary");
+      if (!["summary", "diff", "full"].includes(output as string)) {
+        throw new Error("output must be summary, diff, or full.");
+      }
+      const maxDiffBytes = args.maxDiffBytes ?? 8192;
+      if (typeof maxDiffBytes !== "number" || !Number.isSafeInteger(maxDiffBytes) ||
+          maxDiffBytes < 1 || maxDiffBytes > 1048576) {
+        throw new Error("maxDiffBytes must be an integer between 1 and 1048576.");
+      }
+      if (args.preferWebSocket !== undefined && typeof args.preferWebSocket !== "boolean") {
+        throw new Error("preferWebSocket must be a boolean.");
+      }
+      const result = await client.editFile(
+        requiredText(args, "projectId"),
+        requiredText(args, "filePath"),
         edits,
         {
           preferWebSocket: resolvePreferWebSocket(args.preferWebSocket),
+          expectedHash: args.expectedHash as string | undefined,
+          matchMode: args.matchMode as "exact" | "fuzzy" | undefined,
+          dryRun: args.dryRun as boolean | undefined,
         }
       );
+      const compact = {
+        file: { id: result.file.id, name: result.file.name },
+        appliedCount: result.appliedCount,
+        contentHash: result.contentHash,
+        firstChangedLine: result.firstChangedLine,
+        ...(result.dryRun ? { dryRun: true } : {}),
+        ...(result.usedFuzzyMatch ? { usedFuzzyMatch: true } : {}),
+      };
+      if (output === "summary") return compact;
+      const diff = truncateHead(result.diff, { maxLines: 100, maxBytes: maxDiffBytes });
+      const diffFields = {
+        diff: diff.content,
+        ...(diff.truncated ? { diffTruncated: true, hint: "Read the affected range to inspect all changes, or increase maxDiffBytes (100 diff lines maximum)." } : {}),
+      };
+      if (output === "diff") return { ...compact, ...diffFields };
+      const patch = truncateHead(result.patch, { maxLines: 100, maxBytes: maxDiffBytes });
+      return {
+        ...result, ...diffFields, patch: patch.content,
+        ...(patch.truncated ? { patchTruncated: true } : {}),
+      };
     }
 
     case "typst_upload_asset": {
@@ -218,13 +245,15 @@ export async function dispatchTypstTool(
 
     case "typst_find_and_replace":
       return await client.findAndReplace(String(args.projectId), {
-        pattern: String(args.pattern),
-        replacement: String(args.replacement),
+        pattern: args.pattern as string | undefined,
+        replacement: args.replacement as string | undefined,
+        replacements: args.replacements as ReplaceContentOptions[] | undefined,
+        output: args.output as ReplacementOutput | undefined,
         filePath: args.filePath as string | undefined,
         glob: args.glob as string | undefined,
-        regex: Boolean(args.regex),
-        ignoreCase: Boolean(args.ignoreCase),
-        limit: resolveOptionalNumber(args.limit),
+        regex: args.regex as boolean | undefined,
+        ignoreCase: args.ignoreCase as boolean | undefined,
+        limit: args.limit as number | undefined,
         dryRun: Boolean(args.dryRun),
         preferWebSocket: resolvePreferWebSocket(args.preferWebSocket),
       });
@@ -242,7 +271,7 @@ export function createTypstMcpServer(options: TypstClientOptions = {}): {
   const server = new Server(
     {
       name: "typst-mcp",
-      version: "1.2.1",
+      version: "1.3.0",
     },
     {
       capabilities: {
@@ -304,7 +333,7 @@ export function createTypstMcpServer(options: TypstClientOptions = {}): {
         content: [
           {
             type: "text",
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(result, null, name === "typst_read_file" || name === "typst_edit_file" ? undefined : 2),
           },
         ],
       };

@@ -134,7 +134,7 @@ export const TYPST_MCP_TOOLS: Tool[] = [
   {
     name: "typst_read_file",
     description:
-      "Read a file from a https://typst.app project. Supports text files (.typ, .bib, .toml, etc.) with offset/limit pagination, optional line numbering, and automatic truncation safeguards (2,000 lines or 50KB). Binary image assets (PNG, JPEG, SVG, WebP, GIF, BMP) are returned with native multimodal MCP image content blocks.",
+      "Read project text in bounded pages (default 200 lines/16 KiB) or images as native image blocks. content contains source only; use nextOffset for continuation. contentHash covers the entire raw text file: pass it as expectedHash to typst_edit_file. Compact file metadata by default; output='full' adds metadata, not extra source lines. Use grep to locate relevant lines before reading large files.",
     inputSchema: {
       type: "object",
       properties: {
@@ -147,12 +147,22 @@ export const TYPST_MCP_TOOLS: Tool[] = [
           description: "File path/name (e.g. 'main.typ') or file ID",
         },
         offset: {
-          type: "number",
+          type: "integer",
+          minimum: 1,
           description: "Line number to start reading from (1-indexed)",
         },
         limit: {
-          type: "number",
-          description: "Maximum number of lines to read",
+          type: "integer",
+          minimum: 1,
+          description: "Maximum complete lines to read (default: 200). Use nextOffset to continue.",
+        },
+        maxBytes: {
+          type: "integer", minimum: 1, maximum: 1048576,
+          description: "Maximum returned source bytes, including line number prefixes (default: 16384, maximum: 1 MiB). Increase for unusually long lines.",
+        },
+        output: {
+          type: "string", enum: ["compact", "full"],
+          description: "compact (default): minimal file metadata; full: all file metadata. Both use offset/limit/maxBytes pagination.",
         },
         lineNumbers: {
           type: "boolean",
@@ -194,7 +204,7 @@ export const TYPST_MCP_TOOLS: Tool[] = [
   {
     name: "typst_edit_file",
     description:
-      "Apply one or more surgical text replacements (oldText -> newText) directly to a multiplayer file's Yjs CRDT document in a https://typst.app project. Supports CRLF/LF resilience, UTF-8 BOM preservation, fuzzy matching for Unicode quotes/dashes/whitespace, and returns a unified diff and patch of the changes.",
+      "Apply all targeted edits against one original file snapshot, with one save. Prefer short unique oldText anchors and expectedHash from typst_read_file to reject stale edits. Exact matching by default (LF/CRLF resilient); matchMode='fuzzy' opts into Unicode/whitespace fallback. Malformed, ambiguous, or overlapping edits fail without saving. Summary output by default; dryRun previews a bounded diff. Unchanged characters and BOM are preserved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -208,6 +218,7 @@ export const TYPST_MCP_TOOLS: Tool[] = [
         },
         edits: {
           type: "array",
+          minItems: 1,
           description:
             "One or more targeted non-overlapping replacements. Each oldText must be unique in the original file.",
           items: {
@@ -215,7 +226,8 @@ export const TYPST_MCP_TOOLS: Tool[] = [
             properties: {
               oldText: {
                 type: "string",
-                description: "Unique substring to replace (matches exact or normalized quotes/dashes)",
+                minLength: 1,
+                description: "Unique source substring to replace. All edits match the original file, not earlier edits' results.",
               },
               newText: {
                 type: "string",
@@ -235,6 +247,26 @@ export const TYPST_MCP_TOOLS: Tool[] = [
           description:
             "Optional replacement text for single replacement shorthand",
         },
+        expectedHash: {
+          type: "string", pattern: "^[a-fA-F0-9]{64}$",
+          description: "Recommended: contentHash from the latest read. Checked against fresh downloaded text inside the file mutation queue; stale files fail without saving.",
+        },
+        matchMode: {
+          type: "string", enum: ["exact", "fuzzy"],
+          description: "exact (default) matches source with newline normalization. fuzzy enables Unicode quote/dash/space/NFKC fallback only when an exact match is absent.",
+        },
+        dryRun: {
+          type: "boolean",
+          description: "Validate and preview edits without saving (default: false). Returned contentHash still identifies unchanged cloud text.",
+        },
+        output: {
+          type: "string", enum: ["summary", "diff", "full"],
+          description: "summary (default): counts, new contentHash, firstChangedLine; diff: also a bounded display diff; full: also bounded patch and full metadata. dryRun defaults to diff.",
+        },
+        maxDiffBytes: {
+          type: "integer", minimum: 1, maximum: 1048576,
+          description: "Byte budget per diff/patch field (default: 8192). Each also has a 100-line cap. Truncation is explicit; read affected ranges for full details.",
+        },
         preferWebSocket: {
           type: "boolean",
           description:
@@ -242,6 +274,10 @@ export const TYPST_MCP_TOOLS: Tool[] = [
         },
       },
       required: ["projectId", "filePath"],
+      oneOf: [
+        { required: ["edits"], not: { anyOf: [{ required: ["oldText"] }, { required: ["newText"] }] } },
+        { required: ["oldText", "newText"], not: { required: ["edits"] } },
+      ],
     },
   },
   {
@@ -462,7 +498,7 @@ export const TYPST_MCP_TOOLS: Tool[] = [
   {
     name: "typst_find_and_replace",
     description:
-      "Find and replace text or regular expressions across a single file or all files in a https://typst.app project. Supports dry-run preview diffs, regex capture groups, and per-file mutation queue serialization.",
+      "Find and replace text or regex in one file or project-wide. Use replacements to batch mappings (e.g. Sep → September, Oct → October) in one call with one save per file. Rules run sequentially; later rules see earlier results. Batch output defaults to compact summary; request output='diff' or 'full' for previews. Supports dryRun and per-file mutation serialization. Project-wide changes are not atomic across files.",
     inputSchema: {
       type: "object",
       properties: {
@@ -478,6 +514,29 @@ export const TYPST_MCP_TOOLS: Tool[] = [
           type: "string",
           description:
             "Replacement text (supports $1, $2 capture groups if regex is true)",
+        },
+        replacements: {
+          type: "array",
+          minItems: 1,
+          description:
+            "Ordered replacement rules instead of pattern/replacement. Each rule runs on the previous result. Set regex, ignoreCase, and limit per rule. All rules are validated before any writes; each changed file is saved once.",
+          items: {
+            type: "object",
+            properties: {
+              pattern: { type: "string", minLength: 1 },
+              replacement: { type: "string" },
+              regex: { type: "boolean", description: "Treat pattern as regex (default: false)" },
+              ignoreCase: { type: "boolean", description: "Case-insensitive matching (default: false)" },
+              limit: { type: "integer", minimum: 0, description: "Maximum replacements for this rule per file" },
+            },
+            required: ["pattern", "replacement"],
+          },
+        },
+        output: {
+          type: "string",
+          enum: ["summary", "diff", "full"],
+          description:
+            "summary: counts and first changed line; diff: also display diff; full: also unified patch. Defaults to summary for batches, full for legacy pattern/replacement calls. Applies to dry runs too.",
         },
         filePath: {
           type: "string",
@@ -514,7 +573,11 @@ export const TYPST_MCP_TOOLS: Tool[] = [
             "Push real-time TextUpdate over /editing/v3 WebSocket before REST persistence (default: true)",
         },
       },
-      required: ["projectId", "pattern", "replacement"],
+      required: ["projectId"],
+      oneOf: [
+        { required: ["pattern", "replacement"], not: { required: ["replacements"] } },
+        { required: ["replacements"], not: { anyOf: [{ required: ["pattern"] }, { required: ["replacement"] }, { required: ["regex"] }, { required: ["ignoreCase"] }, { required: ["limit"] }] } },
+      ],
     },
   },
 ];

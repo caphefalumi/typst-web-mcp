@@ -773,6 +773,8 @@ describe("3. End-to-End Mock typst.app Server & All 15 MCP Tools", () => {
     const editRes = (await dispatchTypstTool(client, "typst_edit_file", {
       projectId,
       filePath: "main.typ",
+      output: "full",
+      expectedHash: readMain.contentHash,
       edits: [
         {
           oldText: "Initial draft text.",

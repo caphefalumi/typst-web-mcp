@@ -101,48 +101,120 @@ export interface ReplaceResult {
   firstChangedLine?: number;
 }
 
+export type ReplacementOutput = "summary" | "diff" | "full";
+
+export interface ReplacementRequest {
+  pattern?: string;
+  replacement?: string;
+  regex?: boolean;
+  ignoreCase?: boolean;
+  limit?: number;
+  replacements?: ReplaceContentOptions[];
+  output?: ReplacementOutput;
+}
+
+/** Validate the entire request before any project files can be mutated. */
+export function resolveReplacementRules(options: ReplacementRequest): ReplaceContentOptions[] {
+  const hasSingle = options.pattern !== undefined || options.replacement !== undefined;
+  if (options.replacements !== undefined && hasSingle) {
+    throw new Error("Use either replacements or pattern/replacement, not both.");
+  }
+  if (options.output !== undefined && !["summary", "diff", "full"].includes(options.output)) {
+    throw new Error("output must be summary, diff, or full.");
+  }
+  if (options.replacements !== undefined &&
+      (options.regex !== undefined || options.ignoreCase !== undefined || options.limit !== undefined)) {
+    throw new Error("For batch replacements, set regex, ignoreCase, and limit on each rule.");
+  }
+  const rules = options.replacements ?? [{
+    pattern: options.pattern!, replacement: options.replacement!,
+    regex: options.regex, ignoreCase: options.ignoreCase, limit: options.limit,
+  }];
+  if (!Array.isArray(rules) || rules.length === 0) {
+    throw new Error("replacements must be a non-empty array.");
+  }
+  for (const [index, rule] of rules.entries()) {
+    if (!rule || typeof rule.pattern !== "string" || !rule.pattern.length ||
+        typeof rule.replacement !== "string") {
+      throw new Error(`Replacement ${index + 1} requires a non-empty pattern and a string replacement.`);
+    }
+    for (const key of ["regex", "ignoreCase"] as const) {
+      if (rule[key] !== undefined && typeof rule[key] !== "boolean") {
+        throw new Error(`Replacement ${index + 1}: ${key} must be a boolean.`);
+      }
+    }
+    if (rule.limit !== undefined && (!Number.isInteger(rule.limit) || rule.limit < 0)) {
+      throw new Error(`Replacement ${index + 1}: limit must be a non-negative integer.`);
+    }
+    if (rule.regex) {
+      try { new RegExp(rule.pattern, rule.ignoreCase ? "gi" : "g"); }
+      catch { throw new Error(`Replacement ${index + 1} has an invalid regular expression.`); }
+    }
+  }
+  return rules;
+}
+
 export function replaceInContent(
   filePath: string,
   content: string,
   options: ReplaceContentOptions
 ): ReplaceResult {
-  let flags = "g";
-  if (options.ignoreCase) flags += "i";
+  const result = replaceBatchInContent(filePath, content, [options]);
+  return { ...result, diff: result.diff!, patch: result.patch! };
+}
 
-  let searchRegex: RegExp;
-  if (options.regex) {
-    searchRegex = new RegExp(options.pattern, flags);
-  } else {
-    const escaped = options.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    searchRegex = new RegExp(escaped, flags);
+/** Rules run in order on the result of the previous rule. Diff covers the whole batch. */
+export function replaceBatchInContent(
+  filePath: string,
+  content: string,
+  rules: ReplaceContentOptions[],
+  output: ReplacementOutput = "full"
+): Omit<ReplaceResult, "diff" | "patch"> & {
+  diff?: string; patch?: string; replacementCounts: number[];
+} {
+  resolveReplacementRules({ replacements: rules, output });
+  let updatedText = content;
+  const replacementCounts: number[] = [];
+  for (const options of rules) {
+    let flags = "g";
+    if (options.ignoreCase) flags += "i";
+
+    let searchRegex: RegExp;
+    if (options.regex) {
+      searchRegex = new RegExp(options.pattern, flags);
+    } else {
+      const escaped = options.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      searchRegex = new RegExp(escaped, flags);
+    }
+
+    let count = 0;
+    const limit = options.limit;
+
+    updatedText = updatedText.replace(searchRegex, (match, ...args) => {
+      if (limit !== undefined && count >= limit) {
+        return match;
+      }
+      count++;
+      if (!options.regex) {
+        return options.replacement;
+      }
+      // For regex, support replacement with capture groups ($1, $2).
+      return options.replacement.replace(/\$(\d+)/g, (_, groupIdx) => {
+        const idx = parseInt(groupIdx, 10);
+        return args[idx - 1] ?? "";
+      });
+    });
+    replacementCounts.push(count);
   }
 
-  let count = 0;
-  const limit = options.limit;
-
-  const updatedText = content.replace(searchRegex, (match, ...args) => {
-    if (limit !== undefined && count >= limit) {
-      return match;
-    }
-    count++;
-    if (!options.regex) {
-      return options.replacement;
-    }
-    // For regex, support standard replacement with capture groups ($1, $2)
-    return options.replacement.replace(/\$(\d+)/g, (_, groupIdx) => {
-      const idx = parseInt(groupIdx, 10);
-      return args[idx - 1] ?? "";
-    });
-  });
-
   const diffResult = generateDiffString(content, updatedText);
-  const patch = generateUnifiedPatch(filePath, content, updatedText);
 
   return {
     updatedText,
-    replacementCount: count,
-    diff: diffResult.diff,
-    patch,
+    replacementCount: replacementCounts.reduce((sum, count) => sum + count, 0),
+    replacementCounts,
+    ...(output !== "summary" ? { diff: diffResult.diff } : {}),
+    ...(output === "full" ? { patch: generateUnifiedPatch(filePath, content, updatedText) } : {}),
     firstChangedLine: diffResult.firstChangedLine,
   };
 }

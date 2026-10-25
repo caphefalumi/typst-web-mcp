@@ -38,17 +38,16 @@ import {
   encodeMessage,
   MessageKind,
 } from "../protocol/ws-codec.js";
-import {
-  truncateHead,
-  formatSize,
-  type TruncationResult,
-} from "../utils/truncate.js";
+import { readTextContent, validateReadOptions, hashText, type ReadTextOptions } from "../protocol/read-content.js";
+import { validateEdits } from "../protocol/edit-diff.js";
 import { detectSupportedImageMimeType } from "../utils/mime.js";
 import { withFileMutationQueue } from "../utils/file-mutation-queue.js";
 import {
   matchGlob,
   searchInContent,
-  replaceInContent,
+  replaceBatchInContent,
+  resolveReplacementRules,
+  type ReplacementRequest,
   type GrepMatch,
 } from "../protocol/search-replace.js";
 
@@ -71,14 +70,9 @@ export interface GrepProjectResult {
   truncated: boolean;
 }
 
-export interface FindAndReplaceOptions {
-  pattern: string;
-  replacement: string;
+export interface FindAndReplaceOptions extends ReplacementRequest {
   filePath?: string;
   glob?: string;
-  regex?: boolean;
-  ignoreCase?: boolean;
-  limit?: number;
   dryRun?: boolean;
   preferWebSocket?: boolean;
 }
@@ -87,20 +81,22 @@ export interface FindAndReplaceResult {
   filesModified: Array<{
     file: string;
     replacementsCount: number;
-    diff: string;
-    patch: string;
+    diff?: string;
+    patch?: string;
+    replacementCounts?: number[];
     firstChangedLine?: number;
   }>;
   totalReplacements: number;
   dryRun: boolean;
 }
 
-export interface ReadFileOptions {
-  offset?: number;
-  limit?: number;
-  lineNumbers?: boolean;
-  maxLines?: number;
-  maxBytes?: number;
+export interface ReadFileOptions extends ReadTextOptions {}
+
+export interface EditFileOptions {
+  preferWebSocket?: boolean;
+  expectedHash?: string;
+  matchMode?: "exact" | "fuzzy";
+  dryRun?: boolean;
 }
 
 export interface TypstReadFileResult {
@@ -109,7 +105,10 @@ export interface TypstReadFileResult {
   encoding: "utf-8" | "base64";
   mimeType?: string;
   isImage?: boolean;
-  truncation?: TruncationResult;
+  contentHash?: string;
+  truncated?: boolean;
+  truncatedBy?: "lines" | "bytes";
+  nextOffset?: number;
   totalLines?: number;
   startLine?: number;
   endLine?: number;
@@ -496,111 +495,14 @@ export class TypstCloudClient {
     fileIdOrPath: string,
     options?: ReadFileOptions
   ): Promise<TypstReadFileResult> {
+    validateReadOptions(options ?? {});
     const file = await this.resolveFile(projectId, fileIdOrPath);
     if (file.isMultiplayable) {
       const yjsBytes = await this.downloadFileYjs(projectId, file.id);
-      const text = decodeYjsText(yjsBytes);
-      const allLines = text.split("\n");
-      const totalLines = allLines.length;
-
-      if (options?.offset !== undefined && options.offset > totalLines) {
-        throw new Error(
-          `Offset ${options.offset} is beyond end of file (${totalLines} lines total)`
-        );
-      }
-
-      const startLine = options?.offset ? Math.max(0, options.offset - 1) : 0;
-      const startLineDisplay = startLine + 1;
-      let selectedContent: string;
-      let userLimitedLines: number | undefined;
-
-      if (options?.limit !== undefined) {
-        const endLine = Math.min(startLine + options.limit, totalLines);
-        selectedContent = allLines.slice(startLine, endLine).join("\n");
-        userLimitedLines = endLine - startLine;
-      } else {
-        selectedContent = allLines.slice(startLine).join("\n");
-      }
-
-      const truncation = truncateHead(selectedContent, {
-        maxLines: options?.maxLines,
-        maxBytes: options?.maxBytes,
-      });
-
-      let outputText: string;
-      let endLineDisplay = startLineDisplay;
-
-      if (truncation.firstLineExceedsLimit) {
-        const firstLineSize = formatSize(
-          Buffer.byteLength(allLines[startLine] ?? "", "utf-8")
-        );
-        outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(
-          truncation.maxBytes
-        )} limit]`;
-      } else if (truncation.truncated) {
-        endLineDisplay = startLineDisplay + truncation.outputLines - 1;
-        const nextOffset = endLineDisplay + 1;
-        let body = truncation.content;
-        if (options?.lineNumbers) {
-          const lines = body.split("\n");
-          const width = String(endLineDisplay).length;
-          body = lines
-            .map(
-              (line, idx) =>
-                `${String(startLineDisplay + idx).padStart(width, " ")} | ${line}`
-            )
-            .join("\n");
-        }
-        if (truncation.truncatedBy === "lines") {
-          outputText = `${body}\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalLines}. Use offset=${nextOffset} to continue.]`;
-        } else {
-          outputText = `${body}\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalLines} (${formatSize(
-            truncation.maxBytes
-          )} limit). Use offset=${nextOffset} to continue.]`;
-        }
-      } else if (
-        userLimitedLines !== undefined &&
-        startLine + userLimitedLines < totalLines
-      ) {
-        endLineDisplay = startLine + userLimitedLines;
-        const remaining = totalLines - endLineDisplay;
-        const nextOffset = endLineDisplay + 1;
-        let body = truncation.content;
-        if (options?.lineNumbers) {
-          const lines = body.split("\n");
-          const width = String(endLineDisplay).length;
-          body = lines
-            .map(
-              (line, idx) =>
-                `${String(startLineDisplay + idx).padStart(width, " ")} | ${line}`
-            )
-            .join("\n");
-        }
-        outputText = `${body}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
-      } else {
-        endLineDisplay = totalLines;
-        let body = truncation.content;
-        if (options?.lineNumbers) {
-          const lines = body.split("\n");
-          const width = String(startLineDisplay + lines.length - 1).length;
-          body = lines
-            .map(
-              (line, idx) =>
-                `${String(startLineDisplay + idx).padStart(width, " ")} | ${line}`
-            )
-            .join("\n");
-        }
-        outputText = body;
-      }
-
       return {
         file,
-        content: outputText,
         encoding: "utf-8",
-        totalLines,
-        startLine: startLineDisplay,
-        endLine: endLineDisplay,
-        truncation: truncation.truncated ? truncation : undefined,
+        ...readTextContent(decodeYjsText(yjsBytes), options),
       };
     }
     const blob = await this.downloadFileBlob(projectId, file.id);
@@ -768,20 +670,25 @@ export class TypstCloudClient {
 
       if (existing) {
         if (existing.isMultiplayable) {
-          const remote = await this.downloadFileYjs(projectId, existing.id);
-          const { encodedUpdate } = replaceYjsText(remote, content);
-          const { syncChannel } = await this.saveYjsUpdate(
-            projectId,
-            existing.id,
-            encodedUpdate,
-            options?.preferWebSocket ?? true
-          );
-          return {
-            file: existing,
-            created: false,
-            bytesWritten: Buffer.byteLength(content, "utf8"),
-            syncChannel,
+          const replaceExisting = async () => {
+            const remote = await this.downloadFileYjs(projectId, existing.id);
+            const { encodedUpdate } = replaceYjsText(remote, content);
+            const { syncChannel } = await this.saveYjsUpdate(
+              projectId,
+              existing.id,
+              encodedUpdate,
+              options?.preferWebSocket ?? true
+            );
+            return {
+              file: existing,
+              created: false,
+              bytesWritten: Buffer.byteLength(content, "utf8"),
+              syncChannel,
+            };
           };
+          // Path-based writes must use the same ID lock as surgical edits.
+          return normalized === existing.id ? replaceExisting() :
+            withFileMutationQueue(`${projectId}:${existing.id}`, replaceExisting);
         }
         const rawBytes = new TextEncoder().encode(content);
         const { response } = await this.restCall(
@@ -818,7 +725,7 @@ export class TypstCloudClient {
     projectId: string,
     filePathOrId: string,
     edits: TextEditOperation[],
-    options?: { preferWebSocket?: boolean }
+    options?: EditFileOptions
   ): Promise<{
     file: TypstFileMeta;
     appliedCount: number;
@@ -827,8 +734,22 @@ export class TypstCloudClient {
     diff: string;
     patch: string;
     firstChangedLine?: number;
-    syncChannel: "websocket+rest" | "rest";
+    syncChannel: "websocket+rest" | "rest" | "none";
+    contentHash: string;
+    dryRun: boolean;
+    usedFuzzyMatch: boolean;
   }> {
+    validateEdits(edits);
+    if (options?.expectedHash !== undefined &&
+        (typeof options.expectedHash !== "string" || !/^[a-f\d]{64}$/i.test(options.expectedHash))) {
+      throw new Error("expectedHash must be the SHA-256 contentHash returned by typst_read_file.");
+    }
+    if (options?.matchMode !== undefined && !["exact", "fuzzy"].includes(options.matchMode)) {
+      throw new Error("matchMode must be exact or fuzzy.");
+    }
+    if (options?.dryRun !== undefined && typeof options.dryRun !== "boolean") {
+      throw new Error("dryRun must be a boolean.");
+    }
     const file = await this.resolveFile(projectId, filePathOrId);
     if (!file.isMultiplayable) {
       throw new TypstLoadError(
@@ -839,6 +760,10 @@ export class TypstCloudClient {
 
     return withFileMutationQueue(`${projectId}:${file.id}`, async () => {
       const remote = await this.downloadFileYjs(projectId, file.id);
+      const currentHash = hashText(decodeYjsText(remote));
+      if (options?.expectedHash !== undefined && currentHash !== options.expectedHash.toLowerCase()) {
+        throw new TypstLoadError(["STALE_CONTENT"], "File changed since read. Read the affected range again and retry with its contentHash.");
+      }
       const {
         encodedUpdate,
         previousText,
@@ -847,9 +772,10 @@ export class TypstCloudClient {
         diff,
         patch,
         firstChangedLine,
-      } = editYjsText(remote, edits, file.name);
+        usedFuzzyMatch,
+      } = editYjsText(remote, edits, file.name, options?.matchMode ?? "exact");
 
-      const { syncChannel } = await this.saveYjsUpdate(
+      const { syncChannel } = options?.dryRun ? { syncChannel: "none" as const } : await this.saveYjsUpdate(
         projectId,
         file.id,
         encodedUpdate,
@@ -865,6 +791,9 @@ export class TypstCloudClient {
         patch,
         firstChangedLine,
         syncChannel,
+        contentHash: options?.dryRun ? currentHash : hashText(updatedText),
+        dryRun: Boolean(options?.dryRun),
+        usedFuzzyMatch,
       };
     });
   }
@@ -1280,7 +1209,13 @@ export class TypstCloudClient {
     projectId: string,
     options: FindAndReplaceOptions
   ): Promise<FindAndReplaceResult> {
+    const rules = resolveReplacementRules(options);
+    const output = options.output ?? (options.replacements ? "summary" : "full");
     const files = await this.listFiles(projectId);
+    if (options.filePath && !files.some(file => file.isMultiplayable &&
+        (file.name === options.filePath!.replace(/^\/+/, "") || file.id === options.filePath))) {
+      throw new Error(`Text file not found: ${options.filePath}`);
+    }
     const filesModified: FindAndReplaceResult["filesModified"] = [];
     let totalReplacements = 0;
 
@@ -1302,15 +1237,9 @@ export class TypstCloudClient {
         const remote = await this.downloadFileYjs(projectId, file.id);
         const text = decodeYjsText(remote);
 
-        const repResult = replaceInContent(file.name, text, {
-          pattern: options.pattern,
-          replacement: options.replacement,
-          regex: options.regex,
-          ignoreCase: options.ignoreCase,
-          limit: options.limit,
-        });
+        const repResult = replaceBatchInContent(file.name, text, rules, output);
 
-        if (repResult.replacementCount > 0) {
+        if (repResult.updatedText !== text) {
           if (!options.dryRun) {
             const { encodedUpdate } = replaceYjsText(
               remote,
@@ -1327,8 +1256,9 @@ export class TypstCloudClient {
           filesModified.push({
             file: file.name,
             replacementsCount: repResult.replacementCount,
-            diff: repResult.diff,
-            patch: repResult.patch,
+            ...(repResult.diff !== undefined ? { diff: repResult.diff } : {}),
+            ...(repResult.patch !== undefined ? { patch: repResult.patch } : {}),
+            ...(options.replacements ? { replacementCounts: repResult.replacementCounts } : {}),
             firstChangedLine: repResult.firstChangedLine,
           });
           totalReplacements += repResult.replacementCount;

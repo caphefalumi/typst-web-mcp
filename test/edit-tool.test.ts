@@ -145,8 +145,73 @@ describe("Phase 3 Edit Tool: Resilient Surgical Editing & Diff Generation", () =
       prepareEditArguments({ oldText: "a", newText: "b" })
     ).toEqual([{ oldText: "a", newText: "b" }]);
 
-    // Null/undefined/invalid
-    expect(prepareEditArguments(null)).toEqual([]);
+    // Absent edits are distinct from malformed supplied edits.
+    expect(() => prepareEditArguments(null)).toThrow();
     expect(prepareEditArguments(undefined)).toEqual([]);
+  });
+
+  it("rejects the entire edit list if any entry is malformed", () => {
+    for (const edits of [
+      [{ oldText: "a", newText: "b" }, { oldText: "c" }],
+      "not json", [], [{ oldText: "", newText: "x" }],
+      [{ oldText: 1, newText: "x" }],
+    ]) expect(() => prepareEditArguments(edits)).toThrow();
+  });
+
+  it("rejects overlapping occurrences of the same anchor", () => {
+    expect(() => editYjsText(createInitialYjsUpdate("aaaa"), [
+      { oldText: "aaa", newText: "x" },
+    ])).toThrow("Found 2 occurrences");
+  });
+
+  it("uses exact anchors independently when another edit needs fuzzy matching", () => {
+    const original = '“one” and "one"; “two” — keep — ﬃ  \n';
+    const result = editYjsText(createInitialYjsUpdate(original), [
+      { oldText: '"one"', newText: '"ONE"' },
+      { oldText: '"two"', newText: '"TWO"' },
+    ]);
+    expect(result.updatedText).toBe('“one” and "ONE"; "TWO" — keep — ﬃ  \n');
+    expect(result.usedFuzzyMatch).toBe(true);
+  });
+
+  it("preserves fuzzy-adjacent characters even when NFKC changes lengths", () => {
+    const original = 'ﬃ — “Café” — untouched  \n';
+    const result = editYjsText(createInitialYjsUpdate(original), [
+      { oldText: 'ffi - "Café"', newText: 'Updated' },
+    ]);
+    expect(result.updatedText).toBe('Updated — untouched  \n');
+    const combining = editYjsText(createInitialYjsUpdate('“Cafe\u0301” — keep'), [
+      { oldText: '"Café"', newText: 'Done' },
+    ]);
+    expect(combining.updatedText).toBe('Done — keep');
+  });
+
+  it("rejects partial grapheme fallback and ambiguous fuzzy matches", () => {
+    expect(() => editYjsText(createInitialYjsUpdate("ﬃ"), [{ oldText: "f", newText: "x" }])).toThrow("Could not find");
+    expect(() => editYjsText(createInitialYjsUpdate('“a” ‘a’ “a”'), [{ oldText: '"a"', newText: "x" }])).toThrow("Found 2 occurrences");
+  });
+
+  it("supports exact-only mode and preserves mixed line endings outside edits", () => {
+    expect(() => editYjsText(createInitialYjsUpdate('“a”'), [{ oldText: '"a"', newText: "x" }], "main.typ", "exact"))
+      .toThrow("Could not find");
+    const result = editYjsText(createInitialYjsUpdate("a\r\nb\nc\r\nd\r"), [{ oldText: "b", newText: "B" }]);
+    expect(result.updatedText).toBe("a\r\nB\nc\r\nd\r");
+  });
+
+  it("reports the first changed line for deletion-only edits", () => {
+    const result = editYjsText(createInitialYjsUpdate("a\nb\nc\n"), [{ oldText: "b\n", newText: "" }]);
+    expect(result.firstChangedLine).toBe(2);
+  });
+
+  it("keeps emoji and supplementary Unicode intact when trimming edit boundaries", () => {
+    for (const [oldText, newText] of [
+      ["prefix 😀 suffix", "prefix 😁 suffix"],
+      ["prefix " + String.fromCodePoint(0x10000), "prefix " + String.fromCodePoint(0x10400)],
+      ["🙂abc", "🙂"], ["🙂", "🙂abc"],
+    ]) {
+      const result = editYjsText(createInitialYjsUpdate("before\n" + oldText + "\nafter"), [{ oldText: oldText!, newText: newText! }]);
+      expect(result.updatedText).toBe("before\n" + newText + "\nafter");
+      expect(decodeYjsText(result.mergedState)).toBe(result.updatedText);
+    }
   });
 });

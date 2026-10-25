@@ -1,5 +1,4 @@
 import * as Y from "yjs";
-import * as Diff from "diff";
 import {
   applyEditsToNormalizedContent,
   detectLineEnding,
@@ -8,6 +7,7 @@ import {
   normalizeToLF,
   restoreLineEndings,
   splitBom,
+  validateEdits,
   type Edit,
 } from "./edit-diff.js";
 
@@ -25,6 +25,7 @@ export interface EditYjsTextResult {
   diff: string;
   patch: string;
   firstChangedLine?: number;
+  usedFuzzyMatch: boolean;
 }
 
 function computeUpdateDiff(
@@ -123,11 +124,10 @@ export function replaceYjsText(
 export function editYjsText(
   remoteUpdate: Uint8Array,
   edits: TextEditOperation[],
-  filePath = "file"
+  filePath = "file",
+  matchMode: "exact" | "fuzzy" = "fuzzy"
 ): EditYjsTextResult {
-  if (edits.length === 0) {
-    throw new Error("At least one edit operation is required");
-  }
+  validateEdits(edits);
 
   const doc = new Y.Doc();
   try {
@@ -141,27 +141,50 @@ export function editYjsText(
     const originalEnding = detectLineEnding(contentWithoutBom);
     const normalizedContent = normalizeToLF(contentWithoutBom);
 
-    const { baseContent, newContent } = applyEditsToNormalizedContent(
+    const { baseContent, newContent, matchedEdits, usedFuzzyMatch } = applyEditsToNormalizedContent(
       normalizedContent,
       edits,
-      filePath
+      filePath,
+      matchMode
     );
 
-    const finalContent = bom + restoreLineEndings(newContent, originalEnding);
+    // Map LF-normalized match boundaries back to original UTF-16 offsets.
+    // Preserve all untouched characters, including mixed CRLF/LF line endings.
+    const offsets = [0];
+    for (let i = 0; i < contentWithoutBom.length; i++) {
+      if (contentWithoutBom[i] === "\r" && contentWithoutBom[i + 1] === "\n") i++;
+      offsets.push(i + 1);
+    }
+    const rawEdits = [...matchedEdits].reverse().map(edit => {
+      const start = offsets[edit.matchIndex]!;
+      const end = offsets[edit.matchIndex + edit.matchLength]!;
+      return { start, end, newText: restoreLineEndings(edit.newText, originalEnding) };
+    });
+    let updatedContent = contentWithoutBom;
+    for (const edit of rawEdits) {
+      updatedContent = updatedContent.slice(0, edit.start) + edit.newText + updatedContent.slice(edit.end);
+    }
+    const finalContent = bom + updatedContent;
 
-    // Apply minimal surgical character changes to Y.Text
-    const diffs = Diff.diffChars(previousText, finalContent);
+    // Use known edit ranges instead of diffing the entire document character by
+    // character. Retain each anchor's unchanged prefix/suffix and their CRDT IDs.
     doc.transact(() => {
-      let offset = 0;
-      for (const part of diffs) {
-        if (part.added) {
-          ytext.insert(offset, part.value);
-          offset += part.value.length;
-        } else if (part.removed) {
-          ytext.delete(offset, part.value.length);
-        } else {
-          offset += part.value.length;
-        }
+      for (const edit of rawEdits) {
+        const old = contentWithoutBom.slice(edit.start, edit.end);
+        let prefix = 0;
+        while (prefix < old.length && prefix < edit.newText.length && old[prefix] === edit.newText[prefix]) prefix++;
+        // Never split surrogate pairs when trimming a common prefix/suffix.
+        if (prefix > 0 && /[\uD800-\uDBFF]/.test(old[prefix - 1]!) && /[\uDC00-\uDFFF]/.test(old[prefix] ?? "")) prefix--;
+        let suffix = 0;
+        while (suffix < old.length - prefix && suffix < edit.newText.length - prefix &&
+               old[old.length - 1 - suffix] === edit.newText[edit.newText.length - 1 - suffix]) suffix++;
+        if (suffix > 0 && /[\uDC00-\uDFFF]/.test(old[old.length - suffix]!) &&
+            /[\uD800-\uDBFF]/.test(old[old.length - suffix - 1] ?? "")) suffix--;
+        const index = bom.length + edit.start + prefix;
+        const removed = old.length - prefix - suffix;
+        const inserted = edit.newText.slice(prefix, edit.newText.length - suffix);
+        if (removed) ytext.delete(index, removed);
+        if (inserted) ytext.insert(index, inserted);
       }
     });
 
@@ -178,6 +201,7 @@ export function editYjsText(
       diff: diffResult.diff,
       patch,
       firstChangedLine: diffResult.firstChangedLine,
+      usedFuzzyMatch,
     };
   } finally {
     doc.destroy();
