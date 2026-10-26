@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.1] - 2026-10-26
+
+- fix: Removed oneOf from the advertised typst_edit_file schema (cd21e71)
+
 ## [1.3.0] - 2026-10-25
 
 ### Added
