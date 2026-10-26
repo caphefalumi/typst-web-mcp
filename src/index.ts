@@ -229,7 +229,7 @@ export async function dispatchTypstTool(
         pages: args.pages as string | undefined,
         ppi: resolveOptionalNumber(args.ppi),
         mode: (args.mode as "pages" | "browser" | undefined) ?? "pages",
-        includeBase64: Boolean(args.includeBase64),
+        includeBase64: args.includeBase64 === undefined ? true : Boolean(args.includeBase64),
       });
 
     case "typst_grep_project":
@@ -328,6 +328,37 @@ export function createTypstMcpServer(options: TypstClientOptions = {}): {
             },
           ],
         };
+      }
+      if (
+        name === "typst_capture_screenshot" &&
+        typeof result === "object" &&
+        result !== null &&
+        Array.isArray((result as Record<string, unknown>).screenshots)
+      ) {
+        const preview = result as {
+          screenshots: Array<{ base64?: string; mimeType?: string; [key: string]: unknown }>;
+        };
+        const images = preview.screenshots.filter(
+          (item): item is typeof item & { base64: string } => typeof item.base64 === "string"
+        );
+        if (images.length > 0) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ...preview,
+                  screenshots: preview.screenshots.map(({ base64: _base64, ...item }) => item),
+                }, null, 2),
+              },
+              ...images.map((item) => ({
+                type: "image" as const,
+                data: item.base64,
+                mimeType: item.mimeType ?? "image/png",
+              })),
+            ],
+          };
+        }
       }
       return {
         content: [

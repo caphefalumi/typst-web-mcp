@@ -273,11 +273,6 @@ export const TYPST_MCP_TOOLS: Tool[] = [
             "Push real-time TextUpdate over /editing/v3 WebSocket in addition to REST persistence (default: true)",
         },
       },
-      required: ["projectId", "filePath"],
-      oneOf: [
-        { required: ["edits"], not: { anyOf: [{ required: ["oldText"] }, { required: ["newText"] }] } },
-        { required: ["oldText", "newText"], not: { required: ["edits"] } },
-      ],
     },
   },
   {
@@ -442,7 +437,7 @@ export const TYPST_MCP_TOOLS: Tool[] = [
         includeBase64: {
           type: "boolean",
           description:
-            "Include base64-encoded PNG data in response for direct vision inspection (default: false)",
+            "Include screenshots as image blocks for direct vision inspection (default: true; set false to return paths and metadata only)",
         },
       },
       required: ["projectId"],

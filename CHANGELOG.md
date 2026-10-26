@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [1.3.0] - 2026-10-25
 
 ### Added
+- Removed the `oneOf` constraint from `typst_edit_file`'s advertised schema so MCP clients can render its arguments; edit input combinations remain validated by the tool.
+- Return captured screenshots as MCP image content by default, without requiring a separate file read; `includeBase64: false` opts out.
 - Whole-file SHA-256 content hashes on text reads and optional `expectedHash` checks inside the edit mutation queue; dry-run previews for surgical edits.
 - Compact read/edit MCP responses by default, bounded diff/patch output, and explicit metadata/verbosity options.
 - Ordered `replacements` batches for `typst_find_and_replace`, with one download/save per changed file, per-rule counts and options, and validation of every rule before writes.
