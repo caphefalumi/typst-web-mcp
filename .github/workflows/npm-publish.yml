@@ -51,7 +51,6 @@ jobs:
           package-manager-cache: false
       - uses: oven-sh/setup-bun@v2
       - run: bun ci
-      - run: bun run build
       - name: Publish to npm (OIDC)
         run: env -u NODE_AUTH_TOKEN npm publish --access public
 
